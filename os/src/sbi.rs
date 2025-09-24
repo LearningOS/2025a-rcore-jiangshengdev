@@ -1,6 +1,7 @@
 //! SBI call wrappers
 
 use core::arch::asm;
+use core::sync::atomic::{compiler_fence, Ordering};
 
 const SBI_CONSOLE_PUTCHAR: usize = 1;
 
@@ -8,6 +9,7 @@ const SBI_CONSOLE_PUTCHAR: usize = 1;
 #[inline(always)]
 fn sbi_call(which: usize, arg0: usize, arg1: usize, arg2: usize) -> usize {
     let mut ret;
+    compiler_fence(Ordering::SeqCst);
     unsafe {
         asm!(
             "li x16, 0",
@@ -18,12 +20,15 @@ fn sbi_call(which: usize, arg0: usize, arg1: usize, arg2: usize) -> usize {
             in("x17") which,
         );
     }
+    compiler_fence(Ordering::SeqCst);
     ret
 }
 
 /// use sbi call to putchar in console (qemu uart handler)
 pub fn console_putchar(c: usize) {
+    compiler_fence(Ordering::SeqCst);
     sbi_call(SBI_CONSOLE_PUTCHAR, c, 0, 0);
+    compiler_fence(Ordering::SeqCst);
 }
 
 use crate::board::QEMUExit;
