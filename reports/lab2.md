@@ -77,8 +77,13 @@
 
 ##### 请问哪些异常可能是`缺页`导致的？
 
-- 12 Instruction page fault 指令页面错误
-- 13 Load page fault 加载页错误
+- 12 Instruction page fault
+  - 指令页面错误
+- 13 Load page fault
+  - 加载页错误
+- 15 Store/AMO page fault
+  - 存储页错误
+  - 原子内存操作（atomic memory operation）页错误
 
 ##### 发生`缺页`时，描述相关重要寄存器的值，上次实验描述过的可以简略。
 - 监督异常程序计数器 (`sepc`) 寄存器
