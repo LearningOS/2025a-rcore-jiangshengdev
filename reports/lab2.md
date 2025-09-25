@@ -133,7 +133,7 @@
 为了防范侧信道攻击，我们的 `os` 使用了双页表。但是传统的设计一直是单页表的，也就是说，
 用户线程和对应的内核线程共用同一张页表，只不过内核对应的地址只允许在内核态访问。
 (备注：这里的单 / 双的说法仅为自创的通俗说法，并无这个名词概念，详情见
-`KPTI <https://en.wikipedia.org/wiki/Kernel_page-table_isolation>`\_ )
+[KPTI](https://en.wikipedia.org/wiki/Kernel_page-table_isolation) )
 
 ##### 在单页表情况下，如何更换页表？
 
