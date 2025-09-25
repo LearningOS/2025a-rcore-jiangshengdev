@@ -119,31 +119,31 @@ impl AppManager {
 }
 
 lazy_static! {
-    static ref APP_MANAGER: UPSafeCell<AppManager> = unsafe {
-        UPSafeCell::new({
-            extern "C" {
-                fn _num_app();
-            }
+    static ref APP_MANAGER: UPSafeCell<AppManager> = unsafe { UPSafeCell::new(init_app_manager()) };
+}
 
-            let num_app_ptr = _num_app as usize as *const usize;
-            let num_app = num_app_ptr.read_volatile();
+fn init_app_manager() -> AppManager {
+    extern "C" {
+        fn _num_app();
+    }
 
-            let mut app_start: [usize; MAX_APP_NUM + 1] = [0; MAX_APP_NUM + 1];
+    let num_app_ptr = _num_app as usize as *const usize;
+    let num_app = unsafe { num_app_ptr.read_volatile() };
 
-            let data = num_app_ptr.add(1);
-            let len = num_app + 1;
+    let mut app_start: [usize; MAX_APP_NUM + 1] = [0; MAX_APP_NUM + 1];
 
-            let app_start_raw: &[usize] = core::slice::from_raw_parts(data, len);
+    let data = unsafe { num_app_ptr.add(1) };
+    let len = num_app + 1;
 
-            app_start[..=num_app].copy_from_slice(app_start_raw);
+    let app_start_raw: &[usize] = unsafe { core::slice::from_raw_parts(data, len) };
 
-            AppManager {
-                num_app,
-                current_app: 0,
-                app_start,
-            }
-        })
-    };
+    app_start[..=num_app].copy_from_slice(app_start_raw);
+
+    AppManager {
+        num_app,
+        current_app: 0,
+        app_start,
+    }
 }
 
 /// init batch subsystem
