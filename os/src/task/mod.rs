@@ -11,6 +11,7 @@
 
 mod context;
 mod switch;
+mod syscall_stats;
 #[allow(clippy::module_inception)]
 mod task;
 
@@ -153,6 +154,34 @@ impl TaskManager {
             panic!("All applications completed!");
         }
     }
+
+    /// 记录指定系统调用的调用次数
+    fn record_syscall(&self, syscall_id: usize) {
+        let inner = self.inner.exclusive_access();
+        let current = inner.current_task;
+        syscall_stats::record_syscall(current, syscall_id);
+    }
+
+    /// 获取指定系统调用的累计调用次数
+    fn get_syscall_count(&self, syscall_id: usize) -> usize {
+        let inner = self.inner.exclusive_access();
+        let current = inner.current_task;
+        syscall_stats::get_syscall_count(current, syscall_id)
+    }
+
+    /// 为当前运行的任务创建内存映射
+    pub fn mmap_current_task(&self, start: usize, len: usize, prot: usize) -> isize {
+        let mut inner = self.inner.exclusive_access();
+        let current = inner.current_task;
+        inner.tasks[current].mmap(start, len, prot)
+    }
+
+    /// 取消到 [start, start + len) 虚存的映射
+    pub fn munmap_current_task(&self, start: usize, len: usize) -> isize {
+        let mut inner = self.inner.exclusive_access();
+        let current = inner.current_task;
+        inner.tasks[current].munmap(start, len)
+    }
 }
 
 /// Run the first task in task list.
@@ -188,6 +217,16 @@ pub fn exit_current_and_run_next() {
     run_next_task();
 }
 
+/// 记录指定系统调用的调用次数
+pub fn record_syscall(syscall_id: usize) {
+    TASK_MANAGER.record_syscall(syscall_id);
+}
+
+/// 获取指定系统调用的累计调用次数
+pub fn get_syscall_count(syscall_id: usize) -> usize {
+    TASK_MANAGER.get_syscall_count(syscall_id)
+}
+
 /// Get the current 'Running' task's token.
 pub fn current_user_token() -> usize {
     TASK_MANAGER.get_current_token()
@@ -201,4 +240,14 @@ pub fn current_trap_cx() -> &'static mut TrapContext {
 /// Change the current 'Running' task's program break
 pub fn change_program_brk(size: i32) -> Option<usize> {
     TASK_MANAGER.change_current_program_brk(size)
+}
+
+/// 为当前运行的任务创建内存映射
+pub fn mmap(start: usize, len: usize, prot: usize) -> isize {
+    TASK_MANAGER.mmap_current_task(start, len, prot)
+}
+
+/// 取消到 [start, start + len) 虚存的映射
+pub fn munmap(start: usize, len: usize) -> isize {
+    TASK_MANAGER.munmap_current_task(start, len)
 }

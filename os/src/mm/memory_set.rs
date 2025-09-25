@@ -1,5 +1,6 @@
 //! Implementation of [`MapArea`] and [`MemorySet`].
 
+use super::MmapAreaManager;
 use super::{frame_alloc, FrameTracker};
 use super::{PTEFlags, PageTable, PageTableEntry};
 use super::{PhysAddr, PhysPageNum, VirtAddr, VirtPageNum};
@@ -37,6 +38,8 @@ lazy_static! {
 pub struct MemorySet {
     page_table: PageTable,
     areas: Vec<MapArea>,
+    /// 匿名映射区域管理器
+    mmap_manager: MmapAreaManager,
 }
 
 impl MemorySet {
@@ -45,6 +48,7 @@ impl MemorySet {
         Self {
             page_table: PageTable::new(),
             areas: Vec::new(),
+            mmap_manager: MmapAreaManager::new(),
         }
     }
     /// Get the page table token
@@ -262,10 +266,23 @@ impl MemorySet {
             false
         }
     }
+
+    /// 创建内存映射区域
+    /// 将从 start 开始，长度为 len 的虚拟内存区域与物理内存映射，具有指定的权限
+    pub fn mmap(&mut self, start: VirtAddr, len: usize, permission: MapPermission) -> isize {
+        self.mmap_manager
+            .mmap(&mut self.page_table, start, len, permission)
+    }
+
+    /// 取消虚存的映射
+    pub fn munmap(&mut self, start: VirtAddr, len: usize) -> isize {
+        self.mmap_manager.munmap(&mut self.page_table, start, len)
+    }
 }
+
 /// map area structure, controls a contiguous piece of virtual memory
 pub struct MapArea {
-    vpn_range: VPNRange,
+    pub(crate) vpn_range: VPNRange,
     data_frames: BTreeMap<VirtPageNum, FrameTracker>,
     map_type: MapType,
     map_perm: MapPermission,

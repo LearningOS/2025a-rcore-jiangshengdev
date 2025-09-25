@@ -2,7 +2,8 @@
 use super::TaskContext;
 use crate::config::TRAP_CONTEXT_BASE;
 use crate::mm::{
-    kernel_stack_position, MapPermission, MemorySet, PhysPageNum, VirtAddr, KERNEL_SPACE,
+    kernel_stack_position, parse_prot_flags, MapPermission, MemorySet, PhysPageNum, VirtAddr,
+    KERNEL_SPACE,
 };
 use crate::trap::{trap_handler, TrapContext};
 
@@ -95,6 +96,56 @@ impl TaskControlBlock {
         } else {
             None
         }
+    }
+
+    /// 为任务创建内存映射
+    pub fn mmap(&mut self, start: usize, len: usize, prot: usize) -> isize {
+        // 长度为0直接返回成功
+        if len == 0 {
+            return 0;
+        }
+
+        let start_va = VirtAddr::from(start);
+
+        // start 没有按页大小对齐
+        if !start_va.aligned() {
+            return -1;
+        }
+
+        // prot & 0x7 = 0 (这样的内存无意义)
+        if prot & 0x7 == 0 {
+            return -1;
+        }
+
+        // 验证prot参数
+        let flags = match parse_prot_flags(prot) {
+            Some(flags) => flags,
+            None => return -1,
+        };
+
+        // 将ProtFlags转换为MapPermission
+        let permission = MapPermission::from(flags);
+
+        // 直接使用MemorySet的mmap方法，该方法已经处理了重叠检查
+        self.memory_set.mmap(start_va, len, permission)
+    }
+
+    /// 取消虚存的映射
+    pub fn munmap(&mut self, start: usize, len: usize) -> isize {
+        // 长度为0直接返回成功
+        if len == 0 {
+            return 0;
+        }
+
+        let start_va = VirtAddr::from(start);
+
+        // 检查起始地址是否对齐页面大小
+        if !start_va.aligned() {
+            return -1;
+        }
+
+        // 直接使用 MemorySet 的 munmap 方法解除映射
+        self.memory_set.munmap(start_va, len)
     }
 }
 
