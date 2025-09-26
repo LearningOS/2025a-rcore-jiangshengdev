@@ -35,6 +35,7 @@ pub use processor::{
     current_task, current_trap_cx, current_user_token, run_tasks, schedule, take_current_task,
     Processor,
 };
+
 /// Suspend the current 'Running' task and run the next task in task list.
 pub fn suspend_current_and_run_next() {
     // There must be an application running.
@@ -51,7 +52,9 @@ pub fn suspend_current_and_run_next() {
     // push back to ready queue.
     add_task(task);
     // jump to scheduling cycle
-    schedule(task_cx_ptr);
+    unsafe {
+        schedule(task_cx_ptr);
+    }
 }
 
 /// pid of usertests app in make run TEST=1
@@ -98,7 +101,9 @@ pub fn exit_current_and_run_next(exit_code: i32) {
     drop(task);
     // we do not have to save task context
     let mut _unused = TaskContext::zero_init();
-    schedule(&mut _unused as *mut _);
+    unsafe {
+        schedule(&mut _unused as *mut _);
+    }
 }
 
 lazy_static! {
