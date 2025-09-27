@@ -1,9 +1,9 @@
 use core::any::Any;
-/// Trait for block devices
-/// which reads and writes data in the unit of blocks
+/// 块设备特征
+/// 以块为单位读写数据
 pub trait BlockDevice: Send + Sync + Any {
-    ///Read data form block to buffer
+    /// 从块读取数据到缓冲区
     fn read_block(&self, block_id: usize, buf: &mut [u8]);
-    ///Write data from buffer to block
+    /// 从缓冲区写数据到块
     fn write_block(&self, block_id: usize, buf: &[u8]);
 }

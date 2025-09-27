@@ -5,28 +5,28 @@ use super::{
 use crate::BLOCK_SZ;
 use alloc::sync::Arc;
 use spin::Mutex;
-///An easy file system on block
+/// 基于块的简易文件系统
 pub struct EasyFileSystem {
-    ///Real device
+    /// 真实设备
     pub block_device: Arc<dyn BlockDevice>,
-    ///Inode bitmap
+    /// Inode位图
     pub inode_bitmap: Bitmap,
-    ///Data bitmap
+    /// 数据位图
     pub data_bitmap: Bitmap,
     inode_area_start_block: u32,
     data_area_start_block: u32,
 }
 
 type DataBlock = [u8; BLOCK_SZ];
-/// An easy fs over a block device
+/// 基于块设备的简易文件系统
 impl EasyFileSystem {
-    /// A data block of block size
+    /// 块大小的数据块
     pub fn create(
         block_device: Arc<dyn BlockDevice>,
         total_blocks: u32,
         inode_bitmap_blocks: u32,
     ) -> Arc<Mutex<Self>> {
-        // calculate block size of areas & create bitmaps
+        // 计算各区域的块大小并创建位图
         let inode_bitmap = Bitmap::new(1, inode_bitmap_blocks as usize);
         let inode_num = inode_bitmap.maximum();
         let inode_area_blocks =
@@ -46,7 +46,7 @@ impl EasyFileSystem {
             inode_area_start_block: 1 + inode_bitmap_blocks,
             data_area_start_block: 1 + inode_total_blocks + data_bitmap_blocks,
         };
-        // clear all blocks
+        // 清空所有块
         for i in 0..total_blocks {
             get_block_cache(i as usize, Arc::clone(&block_device))
                 .lock()
@@ -56,7 +56,7 @@ impl EasyFileSystem {
                     }
                 });
         }
-        // initialize SuperBlock
+        // 初始化超级块
         get_block_cache(0, Arc::clone(&block_device)).lock().modify(
             0,
             |super_block: &mut SuperBlock| {
@@ -69,8 +69,8 @@ impl EasyFileSystem {
                 );
             },
         );
-        // write back immediately
-        // create a inode for root node "/"
+        // 立即写回
+        // 为根节点"/"创建inode
         assert_eq!(efs.alloc_inode(), 0);
         let (root_inode_block_id, root_inode_offset) = efs.get_disk_inode_pos(0);
         get_block_cache(root_inode_block_id as usize, Arc::clone(&block_device))
@@ -81,9 +81,9 @@ impl EasyFileSystem {
         block_cache_sync_all();
         Arc::new(Mutex::new(efs))
     }
-    /// Open a block device as a filesystem
+    /// 将块设备作为文件系统打开
     pub fn open(block_device: Arc<dyn BlockDevice>) -> Arc<Mutex<Self>> {
-        // read SuperBlock
+        // 读取超级块
         get_block_cache(0, Arc::clone(&block_device))
             .lock()
             .read(0, |super_block: &SuperBlock| {
@@ -103,15 +103,15 @@ impl EasyFileSystem {
                 Arc::new(Mutex::new(efs))
             })
     }
-    /// Get the root inode of the filesystem
+    /// 获取文件系统的根inode
     pub fn root_inode(efs: &Arc<Mutex<Self>>) -> Inode {
         let block_device = Arc::clone(&efs.lock().block_device);
-        // acquire efs lock temporarily
+        // 临时获取efs锁
         let (block_id, block_offset) = efs.lock().get_disk_inode_pos(0);
-        // release efs lock
+        // 释放efs锁
         Inode::new(block_id, block_offset, Arc::clone(efs), block_device)
     }
-    /// Get inode by id
+    /// 根据编号获取inode
     pub fn get_disk_inode_pos(&self, inode_id: u32) -> (u32, usize) {
         let inode_size = core::mem::size_of::<DiskInode>();
         let inodes_per_block = (BLOCK_SZ / inode_size) as u32;
@@ -121,20 +121,20 @@ impl EasyFileSystem {
             (inode_id % inodes_per_block) as usize * inode_size,
         )
     }
-    /// Get data block by id
+    /// 根据编号获取数据块
     pub fn get_data_block_id(&self, data_block_id: u32) -> u32 {
         self.data_area_start_block + data_block_id
     }
-    /// Allocate a new inode
+    /// 分配新的inode
     pub fn alloc_inode(&mut self) -> u32 {
         self.inode_bitmap.alloc(&self.block_device).unwrap() as u32
     }
 
-    /// Allocate a data block
+    /// 分配数据块
     pub fn alloc_data(&mut self) -> u32 {
         self.data_bitmap.alloc(&self.block_device).unwrap() as u32 + self.data_area_start_block
     }
-    /// Deallocate a data block
+    /// 释放数据块
     pub fn dealloc_data(&mut self, block_id: u32) {
         get_block_cache(block_id as usize, Arc::clone(&self.block_device))
             .lock()

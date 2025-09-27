@@ -3,20 +3,20 @@ use alloc::collections::VecDeque;
 use alloc::sync::Arc;
 use lazy_static::*;
 use spin::Mutex;
-/// Cached block inside memory
+/// 内存中的缓存块
 pub struct BlockCache {
-    /// cached block data
+    /// 缓存的块数据
     cache: [u8; BLOCK_SZ],
-    /// underlying block id
+    /// 底层块编号
     block_id: usize,
-    /// underlying block device
+    /// 底层块设备
     block_device: Arc<dyn BlockDevice>,
-    /// whether the block is dirty
+    /// 块是否被修改
     modified: bool,
 }
 
 impl BlockCache {
-    /// Load a new BlockCache from disk.
+    /// 从磁盘加载新的块缓存
     pub fn new(block_id: usize, block_device: Arc<dyn BlockDevice>) -> Self {
         let mut cache = [0u8; BLOCK_SZ];
         block_device.read_block(block_id, &mut cache);
@@ -27,7 +27,7 @@ impl BlockCache {
             modified: false,
         }
     }
-    /// Get the address of an offset inside the cached block data
+    /// 获取缓存块数据中某偏移的地址
     fn addr_of_offset(&self, offset: usize) -> usize {
         &self.cache[offset] as *const _ as usize
     }
@@ -74,7 +74,7 @@ impl Drop for BlockCache {
         self.sync()
     }
 }
-/// Use a block cache of 16 blocks
+/// 使用16个块的块缓存
 const BLOCK_CACHE_SIZE: usize = 16;
 
 pub struct BlockCacheManager {
@@ -96,9 +96,9 @@ impl BlockCacheManager {
         if let Some(pair) = self.queue.iter().find(|pair| pair.0 == block_id) {
             Arc::clone(&pair.1)
         } else {
-            // substitute
+            // 替换
             if self.queue.len() == BLOCK_CACHE_SIZE {
-                // from front to tail
+                // 从前到后
                 if let Some((idx, _)) = self
                     .queue
                     .iter()
@@ -110,7 +110,7 @@ impl BlockCacheManager {
                     panic!("Run out of BlockCache!");
                 }
             }
-            // load block into mem and push back
+            // 将块加载到内存并推入队列
             let block_cache = Arc::new(Mutex::new(BlockCache::new(
                 block_id,
                 Arc::clone(&block_device),
@@ -122,11 +122,11 @@ impl BlockCacheManager {
 }
 
 lazy_static! {
-    /// The global block cache manager
+    /// 全局块缓存管理器
     pub static ref BLOCK_CACHE_MANAGER: Mutex<BlockCacheManager> =
         Mutex::new(BlockCacheManager::new());
 }
-/// Get the block cache corresponding to the given block id and block device
+/// 获取给定块编号和块设备对应的块缓存
 pub fn get_block_cache(
     block_id: usize,
     block_device: Arc<dyn BlockDevice>,
@@ -135,7 +135,7 @@ pub fn get_block_cache(
         .lock()
         .get_block_cache(block_id, block_device)
 }
-/// Sync all block cache to block device
+/// 将所有块缓存同步到块设备
 pub fn block_cache_sync_all() {
     let manager = BLOCK_CACHE_MANAGER.lock();
     for (_, cache) in manager.queue.iter() {
