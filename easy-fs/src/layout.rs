@@ -116,10 +116,14 @@ impl DiskInode {
     /// # 参数
     /// * `type_` - inode类型（文件或目录）
     pub fn initialize(&mut self, type_: DiskInodeType) {
+        // 初始化文件大小为0
         self.size = 0;
+        // 清空所有直接块索引
         self.direct.iter_mut().for_each(|v| *v = 0);
+        // 清空间接块索引
         self.indirect1 = 0;
         self.indirect2 = 0;
+        // 设置inode类型
         self.type_ = type_;
     }
     /// 检查此inode是否为目录
@@ -145,6 +149,7 @@ impl DiskInode {
         Self::_data_blocks(self.size)
     }
     fn _data_blocks(size: u32) -> u32 {
+        // 使用向上取整计算需要的数据块数：(size + BLOCK_SZ - 1) / BLOCK_SZ
         (size + BLOCK_SZ as u32 - 1) / BLOCK_SZ as u32
     }
     /// 返回指定大小所需的总块数，包括一级/二级间接块
@@ -155,16 +160,17 @@ impl DiskInode {
     /// # 返回
     /// 总共需要的块数（包括间接块）
     pub fn total_blocks(size: u32) -> u32 {
+        // 计算需要的数据块数
         let data_blocks = Self::_data_blocks(size) as usize;
         let mut total = data_blocks as usize;
-        // 一级间接
+        // 如果数据块数超过直接索引范围，需要一级间接块
         if data_blocks > INODE_DIRECT_COUNT {
             total += 1;
         }
-        // 二级间接
+        // 如果数据块数超过一级间接索引范围，需要二级间接块
         if data_blocks > INDIRECT1_BOUND {
             total += 1;
-            // 子一级间接
+            // 计算需要的子一级间接块数量
             total +=
                 (data_blocks - INDIRECT1_BOUND + INODE_INDIRECT1_COUNT - 1) / INODE_INDIRECT1_COUNT;
         }
@@ -191,24 +197,34 @@ impl DiskInode {
     /// 实际的磁盘块编号
     pub fn get_block_id(&self, inner_id: u32, block_device: &Arc<dyn BlockDevice>) -> u32 {
         let inner_id = inner_id as usize;
+        // 根据块编号范围确定使用哪种索引方式
         if inner_id < INODE_DIRECT_COUNT {
+            // 直接索引：块编号在直接索引范围内，直接从direct数组获取
             self.direct[inner_id]
         } else if inner_id < INDIRECT1_BOUND {
+            // 一级间接索引：需要通过一级间接块查找
             get_block_cache(self.indirect1 as usize, Arc::clone(block_device))
                 .lock()
                 .read(0, |indirect_block: &IndirectBlock| {
+                    // 计算在一级间接块中的索引位置
                     indirect_block[inner_id - INODE_DIRECT_COUNT]
                 })
         } else {
+            // 二级间接索引：需要通过二级间接块查找
+            // 计算在二级间接索引范围内的相对位置
             let last = inner_id - INDIRECT1_BOUND;
+            // 首先从二级间接块中获取对应的一级间接块编号
             let indirect1 = get_block_cache(self.indirect2 as usize, Arc::clone(block_device))
                 .lock()
                 .read(0, |indirect2: &IndirectBlock| {
+                    // 计算应该使用哪个一级间接块
                     indirect2[last / INODE_INDIRECT1_COUNT]
                 });
+            // 然后从对应的一级间接块中获取实际的数据块编号
             get_block_cache(indirect1 as usize, Arc::clone(block_device))
                 .lock()
                 .read(0, |indirect1: &IndirectBlock| {
+                    // 计算在一级间接块中的索引位置
                     indirect1[last % INODE_INDIRECT1_COUNT]
                 })
         }
@@ -225,65 +241,86 @@ impl DiskInode {
         new_blocks: Vec<u32>,
         block_device: &Arc<dyn BlockDevice>,
     ) {
+        // 记录当前已分配的数据块数
         let mut current_blocks = self.data_blocks();
+        // 更新文件大小
         self.size = new_size;
+        // 计算新大小需要的总数据块数
         let mut total_blocks = self.data_blocks();
+        // 创建新块的迭代器
         let mut new_blocks = new_blocks.into_iter();
-        // 填充直接块
+        // 首先填充直接块索引
         while current_blocks < total_blocks.min(INODE_DIRECT_COUNT as u32) {
+            // 将新分配的块编号存入直接索引数组
             self.direct[current_blocks as usize] = new_blocks.next().unwrap();
             current_blocks += 1;
         }
-        // 分配一级间接块
+        // 如果需要一级间接块
         if total_blocks > INODE_DIRECT_COUNT as u32 {
+            // 如果是第一次需要一级间接块，分配一个新块作为间接块
             if current_blocks == INODE_DIRECT_COUNT as u32 {
                 self.indirect1 = new_blocks.next().unwrap();
             }
+            // 调整计数器，转换到一级间接块的索引空间
             current_blocks -= INODE_DIRECT_COUNT as u32;
             total_blocks -= INODE_DIRECT_COUNT as u32;
         } else {
+            // 不需要间接块，直接返回
             return;
         }
-        // 填充一级间接块
+        // 填充一级间接块中的数据块索引
         get_block_cache(self.indirect1 as usize, Arc::clone(block_device))
             .lock()
             .modify(0, |indirect1: &mut IndirectBlock| {
+                // 在一级间接块中填充数据块索引
                 while current_blocks < total_blocks.min(INODE_INDIRECT1_COUNT as u32) {
                     indirect1[current_blocks as usize] = new_blocks.next().unwrap();
                     current_blocks += 1;
                 }
             });
-        // 分配二级间接块
+        // 如果需要二级间接块
         if total_blocks > INODE_INDIRECT1_COUNT as u32 {
+            // 如果是第一次需要二级间接块，分配一个新块
             if current_blocks == INODE_INDIRECT1_COUNT as u32 {
                 self.indirect2 = new_blocks.next().unwrap();
             }
+            // 调整计数器，转换到二级间接块的索引空间
             current_blocks -= INODE_INDIRECT1_COUNT as u32;
             total_blocks -= INODE_INDIRECT1_COUNT as u32;
         } else {
+            // 不需要二级间接块，直接返回
             return;
         }
-        // 填充二级间接块从(a0, b0) -> (a1, b1)
+        // 处理二级间接块的复杂分配逻辑
+        // 使用二维坐标系统：(a, b) 其中a是一级间接块索引，b是块内索引
+        // 起始一级间接块索引
         let mut a0 = current_blocks as usize / INODE_INDIRECT1_COUNT;
+        // 起始块内索引
         let mut b0 = current_blocks as usize % INODE_INDIRECT1_COUNT;
+        // 结束一级间接块索引
         let a1 = total_blocks as usize / INODE_INDIRECT1_COUNT;
+        // 结束块内索引
         let b1 = total_blocks as usize % INODE_INDIRECT1_COUNT;
-        // 分配低级一级间接块
+
+        // 在二级间接块中分配一级间接块和数据块
         get_block_cache(self.indirect2 as usize, Arc::clone(block_device))
             .lock()
             .modify(0, |indirect2: &mut IndirectBlock| {
+                // 遍历从(a0,b0)到(a1,b1)的所有位置
                 while (a0 < a1) || (a0 == a1 && b0 < b1) {
+                    // 如果是新的一级间接块的开始位置，需要分配新的一级间接块
                     if b0 == 0 {
                         indirect2[a0] = new_blocks.next().unwrap();
                     }
-                    // 填充当前块
+                    // 在当前一级间接块中分配数据块
                     get_block_cache(indirect2[a0] as usize, Arc::clone(block_device))
                         .lock()
                         .modify(0, |indirect1: &mut IndirectBlock| {
                             indirect1[b0] = new_blocks.next().unwrap();
                         });
-                    // 移动到下一个
+                    // 移动到下一个位置
                     b0 += 1;
+                    // 如果当前一级间接块已满，移动到下一个一级间接块
                     if b0 == INODE_INDIRECT1_COUNT {
                         b0 = 0;
                         a0 += 1;
@@ -301,74 +338,100 @@ impl DiskInode {
     /// # 返回
     /// 需要释放的所有块编号列表
     pub fn clear_size(&mut self, block_device: &Arc<dyn BlockDevice>) -> Vec<u32> {
+        // 创建用于存储需要释放的块编号的向量
         let mut v: Vec<u32> = Vec::new();
+        // 获取当前文件使用的数据块数
         let mut data_blocks = self.data_blocks() as usize;
+        // 将文件大小设置为0
         self.size = 0;
+        // 初始化当前处理的块计数器
         let mut current_blocks = 0usize;
-        // 直接块
+        // 处理直接块的释放
         while current_blocks < data_blocks.min(INODE_DIRECT_COUNT) {
+            // 将直接块编号加入释放列表
             v.push(self.direct[current_blocks]);
+            // 清空直接块索引
             self.direct[current_blocks] = 0;
             current_blocks += 1;
         }
-        // 一级间接块
+        // 检查是否需要处理一级间接块
         if data_blocks > INODE_DIRECT_COUNT {
+            // 将一级间接块本身加入释放列表
             v.push(self.indirect1);
+            // 调整剩余数据块数和计数器
             data_blocks -= INODE_DIRECT_COUNT;
             current_blocks = 0;
         } else {
+            // 只有直接块，直接返回
             return v;
         }
-        // 一级间接
+        // 处理一级间接块中的数据块
         get_block_cache(self.indirect1 as usize, Arc::clone(block_device))
             .lock()
             .modify(0, |indirect1: &mut IndirectBlock| {
+                // 遍历一级间接块中的所有数据块索引
                 while current_blocks < data_blocks.min(INODE_INDIRECT1_COUNT) {
+                    // 将数据块编号加入释放列表
                     v.push(indirect1[current_blocks]);
-                    //indirect1[current_blocks] = 0;
+                    // 注意：这里不清零索引，因为整个间接块都会被释放
                     current_blocks += 1;
                 }
             });
+        // 清空一级间接块索引
         self.indirect1 = 0;
-        // 二级间接块
+        // 检查是否需要处理二级间接块
         if data_blocks > INODE_INDIRECT1_COUNT {
+            // 将二级间接块本身加入释放列表
             v.push(self.indirect2);
+            // 调整剩余数据块数
             data_blocks -= INODE_INDIRECT1_COUNT;
         } else {
+            // 只需要处理到一级间接块，直接返回
             return v;
         }
-        // 二级间接
+        // 处理二级间接块的释放
         assert!(data_blocks <= INODE_INDIRECT2_COUNT);
+        // 计算需要释放的一级间接块数量和最后一个块的部分大小
+        // 完整的一级间接块数量
         let a1 = data_blocks / INODE_INDIRECT1_COUNT;
+        // 最后一个一级间接块中的数据块数量
         let b1 = data_blocks % INODE_INDIRECT1_COUNT;
+
         get_block_cache(self.indirect2 as usize, Arc::clone(block_device))
             .lock()
             .modify(0, |indirect2: &mut IndirectBlock| {
-                // 完整的一级间接块
+                // 释放所有完整的一级间接块及其包含的数据块
                 for entry in indirect2.iter_mut().take(a1) {
+                    // 将一级间接块本身加入释放列表
                     v.push(*entry);
+                    // 释放该一级间接块中的所有数据块
                     get_block_cache(*entry as usize, Arc::clone(block_device))
                         .lock()
                         .modify(0, |indirect1: &mut IndirectBlock| {
+                            // 遍历一级间接块中的所有数据块索引
                             for entry in indirect1.iter() {
                                 v.push(*entry);
                             }
                         });
                 }
-                // 最后的一级间接块
+                // 处理最后一个部分填充的一级间接块
                 if b1 > 0 {
+                    // 将最后一个一级间接块本身加入释放列表
                     v.push(indirect2[a1]);
+                    // 只释放该块中实际使用的数据块
                     get_block_cache(indirect2[a1] as usize, Arc::clone(block_device))
                         .lock()
                         .modify(0, |indirect1: &mut IndirectBlock| {
+                            // 只遍历前b1个数据块索引
                             for entry in indirect1.iter().take(b1) {
                                 v.push(*entry);
                             }
                         });
-                    //indirect2[a1] = 0;
                 }
             });
+        // 清空二级间接块索引
         self.indirect2 = 0;
+        // 返回所有需要释放的块编号列表
         v
     }
     /// 从当前磁盘inode的指定偏移处读取数据
@@ -386,34 +449,43 @@ impl DiskInode {
         buf: &mut [u8],
         block_device: &Arc<dyn BlockDevice>,
     ) -> usize {
+        // 初始化读取范围
         let mut start = offset;
         let end = (offset + buf.len()).min(self.size as usize);
+        // 如果读取范围无效，直接返回0
         if start >= end {
             return 0;
         }
+        // 计算起始块编号和已读取字节数
         let mut start_block = start / BLOCK_SZ;
         let mut read_size = 0usize;
         loop {
             // 计算当前块的结束位置
             let mut end_current_block = (start / BLOCK_SZ + 1) * BLOCK_SZ;
             end_current_block = end_current_block.min(end);
-            // 读取并更新读取大小
+            // 计算当前块需要读取的字节数
             let block_read_size = end_current_block - start;
+            // 获取目标缓冲区的切片
             let dst = &mut buf[read_size..read_size + block_read_size];
+            // 获取数据块并读取数据
             get_block_cache(
                 self.get_block_id(start_block as u32, block_device) as usize,
                 Arc::clone(block_device),
             )
             .lock()
             .read(0, |data_block: &DataBlock| {
+                // 计算源数据在块内的位置和范围
                 let src = &data_block[start % BLOCK_SZ..start % BLOCK_SZ + block_read_size];
+                // 复制数据到目标缓冲区
                 dst.copy_from_slice(src);
             });
+            // 更新已读取的字节数
             read_size += block_read_size;
-            // 移动到下一个块
+            // 检查是否已完成所有读取
             if end_current_block == end {
                 break;
             }
+            // 移动到下一个块
             start_block += 1;
             start = end_current_block;
         }
@@ -435,32 +507,41 @@ impl DiskInode {
         buf: &[u8],
         block_device: &Arc<dyn BlockDevice>,
     ) -> usize {
+        // 初始化写入范围
         let mut start = offset;
         let end = (offset + buf.len()).min(self.size as usize);
+        // 确保写入范围有效
         assert!(start <= end);
+        // 计算起始块编号和已写入字节数
         let mut start_block = start / BLOCK_SZ;
         let mut write_size = 0usize;
         loop {
             // 计算当前块的结束位置
             let mut end_current_block = (start / BLOCK_SZ + 1) * BLOCK_SZ;
             end_current_block = end_current_block.min(end);
-            // 写入并更新写入大小
+            // 计算当前块需要写入的字节数
             let block_write_size = end_current_block - start;
+            // 获取数据块并写入数据
             get_block_cache(
                 self.get_block_id(start_block as u32, block_device) as usize,
                 Arc::clone(block_device),
             )
             .lock()
             .modify(0, |data_block: &mut DataBlock| {
+                // 获取源数据切片
                 let src = &buf[write_size..write_size + block_write_size];
+                // 计算目标位置在块内的范围
                 let dst = &mut data_block[start % BLOCK_SZ..start % BLOCK_SZ + block_write_size];
+                // 复制数据到目标位置
                 dst.copy_from_slice(src);
             });
+            // 更新已写入的字节数
             write_size += block_write_size;
-            // 移动到下一个块
+            // 检查是否已完成所有写入
             if end_current_block == end {
                 break;
             }
+            // 移动到下一个块
             start_block += 1;
             start = end_current_block;
         }
@@ -498,8 +579,11 @@ impl DirEntry {
     /// # 返回
     /// 新的目录项实例
     pub fn new(name: &str, inode_id: u32) -> Self {
+        // 创建名称字节数组，初始化为0
         let mut bytes = [0u8; NAME_LENGTH_LIMIT + 1];
+        // 将文件名复制到字节数组中
         bytes[..name.len()].copy_from_slice(name.as_bytes());
+        // 创建新的目录项
         Self {
             name: bytes,
             inode_id,
@@ -524,7 +608,9 @@ impl DirEntry {
     /// # 返回
     /// 文件或目录名称的字符串切片
     pub fn name(&self) -> &str {
+        // 查找字符串结束位置（第一个null字节）
         let len = (0usize..).find(|i| self.name[*i] == 0).unwrap();
+        // 将字节数组转换为字符串切片
         core::str::from_utf8(&self.name[..len]).unwrap()
     }
     /// 获取目录项对应的inode编号

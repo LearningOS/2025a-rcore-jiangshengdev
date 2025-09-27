@@ -25,8 +25,11 @@ impl BlockCache {
     /// # 返回
     /// 新创建的块缓存实例
     pub fn new(block_id: usize, block_device: Arc<dyn BlockDevice>) -> Self {
+        // 创建空的缓存数组
         let mut cache = [0u8; BLOCK_SZ];
+        // 从块设备读取数据到缓存
         block_device.read_block(block_id, &mut cache);
+        // 创建新的块缓存实例，初始状态为未修改
         Self {
             cache,
             block_id,
@@ -56,9 +59,13 @@ impl BlockCache {
     where
         T: Sized,
     {
+        // 获取类型T的大小
         let type_size = core::mem::size_of::<T>();
+        // 确保偏移量和类型大小不会超出块边界
         assert!(offset + type_size <= BLOCK_SZ);
+        // 获取偏移位置的内存地址
         let addr = self.addr_of_offset(offset);
+        // 将地址转换为类型T的引用
         unsafe { &*(addr as *const T) }
     }
 
@@ -73,10 +80,15 @@ impl BlockCache {
     where
         T: Sized,
     {
+        // 获取类型T的大小
         let type_size = core::mem::size_of::<T>();
+        // 确保偏移量和类型大小不会超出块边界
         assert!(offset + type_size <= BLOCK_SZ);
+        // 标记块已被修改，需要写回磁盘
         self.modified = true;
+        // 获取偏移位置的内存地址
         let addr = self.addr_of_offset(offset);
+        // 将地址转换为类型T的可变引用
         unsafe { &mut *(addr as *mut T) }
     }
 
@@ -107,8 +119,11 @@ impl BlockCache {
     /// 将缓存同步到块设备
     /// 如果块被修改过，则将数据写回到磁盘
     pub fn sync(&mut self) {
+        // 只有在块被修改过的情况下才需要写回
         if self.modified {
+            // 重置修改标志
             self.modified = false;
+            // 将缓存数据写回到块设备
             self.block_device.write_block(self.block_id, &self.cache);
         }
     }
@@ -153,28 +168,36 @@ impl BlockCacheManager {
         block_id: usize,
         block_device: Arc<dyn BlockDevice>,
     ) -> Arc<Mutex<BlockCache>> {
+        // 首先检查缓存中是否已存在该块
         if let Some(pair) = self.queue.iter().find(|pair| pair.0 == block_id) {
+            // 缓存命中，直接返回现有的块缓存
             Arc::clone(&pair.1)
         } else {
-            // 替换
+            // 缓存未命中，需要加载新块
+            // 检查缓存是否已满
             if self.queue.len() == BLOCK_CACHE_SIZE {
-                // 从前到后
+                // 缓存已满，需要使用LRU策略替换
+                // 查找引用计数为1的块缓存（只被管理器持有，没有外部引用）
                 if let Some((idx, _)) = self
                     .queue
                     .iter()
                     .enumerate()
                     .find(|(_, pair)| Arc::strong_count(&pair.1) == 1)
                 {
+                    // 找到可替换的块，将其从队列中移除
+                    // 由于Arc的Drop特性，块缓存会自动同步到磁盘
                     self.queue.drain(idx..=idx);
                 } else {
+                    // 所有块都有外部引用，无法替换，这是一个错误情况
                     panic!("Run out of BlockCache!");
                 }
             }
-            // 将块加载到内存并推入队列
+            // 创建新的块缓存并从磁盘加载数据
             let block_cache = Arc::new(Mutex::new(BlockCache::new(
                 block_id,
                 Arc::clone(&block_device),
             )));
+            // 将新块缓存添加到队列末尾（最近使用）
             self.queue.push_back((block_id, Arc::clone(&block_cache)));
             block_cache
         }
@@ -204,8 +227,11 @@ pub fn get_block_cache(
 }
 /// 将所有块缓存同步到块设备
 pub fn block_cache_sync_all() {
+    // 获取全局缓存管理器的锁
     let manager = BLOCK_CACHE_MANAGER.lock();
+    // 遍历所有缓存的块
     for (_, cache) in manager.queue.iter() {
+        // 同步每个块缓存到磁盘
         cache.lock().sync();
     }
 }

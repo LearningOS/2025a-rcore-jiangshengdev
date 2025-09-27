@@ -36,14 +36,24 @@ impl EasyFileSystem {
         total_blocks: u32,
         inode_bitmap_blocks: u32,
     ) -> Arc<Mutex<Self>> {
-        // 计算各区域的块大小并创建位图
+        // 计算文件系统各区域的布局
+        // 创建inode位图，从块1开始（块0是超级块）
         let inode_bitmap = Bitmap::new(1, inode_bitmap_blocks as usize);
+        // 计算inode位图能管理的最大inode数量
         let inode_num = inode_bitmap.maximum();
+        // 计算存储所有inode需要的块数
+        // 使用向上取整：(inode_num * inode_size + BLOCK_SZ - 1) / BLOCK_SZ
         let inode_area_blocks =
             ((inode_num * core::mem::size_of::<DiskInode>() + BLOCK_SZ - 1) / BLOCK_SZ) as u32;
+        // inode相关区域的总块数 = inode位图块数 + inode存储区块数
         let inode_total_blocks = inode_bitmap_blocks + inode_area_blocks;
+        // 数据相关区域的总块数 = 总块数 - 超级块(1) - inode相关块数
         let data_total_blocks = total_blocks - 1 - inode_total_blocks;
+        // 计算数据位图需要的块数
+        // 每个位图块可以管理4096个数据块，所以需要 (data_total_blocks + 4096) / 4097 个位图块
+        // 4097 = 4096 + 1，其中1是位图块本身
         let data_bitmap_blocks = (data_total_blocks + 4096) / 4097;
+        // 实际可用的数据块数 = 数据总块数 - 数据位图块数
         let data_area_blocks = data_total_blocks - data_bitmap_blocks;
         let data_bitmap = Bitmap::new(
             (1 + inode_bitmap_blocks + inode_area_blocks) as usize,
@@ -56,11 +66,12 @@ impl EasyFileSystem {
             inode_area_start_block: 1 + inode_bitmap_blocks,
             data_area_start_block: 1 + inode_total_blocks + data_bitmap_blocks,
         };
-        // 清空所有块
+        // 初始化所有块，将其内容清零
         for i in 0..total_blocks {
             get_block_cache(i as usize, Arc::clone(&block_device))
                 .lock()
                 .modify(0, |data_block: &mut DataBlock| {
+                    // 将块中的每个字节都设置为0
                     for byte in data_block.iter_mut() {
                         *byte = 0;
                     }
@@ -79,16 +90,20 @@ impl EasyFileSystem {
                 );
             },
         );
-        // 立即写回
-        // 为根节点"/"创建inode
+        // 立即写回超级块到磁盘
+        // 为根节点"/"创建inode，确保分配到编号0
         assert_eq!(efs.alloc_inode(), 0);
+        // 获取根inode在磁盘上的位置
         let (root_inode_block_id, root_inode_offset) = efs.get_disk_inode_pos(0);
+        // 初始化根inode为目录类型
         get_block_cache(root_inode_block_id as usize, Arc::clone(&block_device))
             .lock()
             .modify(root_inode_offset, |disk_inode: &mut DiskInode| {
                 disk_inode.initialize(DiskInodeType::Directory);
             });
+        // 确保所有初始化数据都写入磁盘
         block_cache_sync_all();
+        // 返回新创建的文件系统实例
         Arc::new(Mutex::new(efs))
     }
     /// 将现有块设备作为文件系统打开
@@ -99,20 +114,26 @@ impl EasyFileSystem {
     /// # 返回
     /// 打开的文件系统实例
     pub fn open(block_device: Arc<dyn BlockDevice>) -> Arc<Mutex<Self>> {
-        // 读取超级块
+        // 从块0读取超级块信息
         get_block_cache(0, Arc::clone(&block_device))
             .lock()
             .read(0, |super_block: &SuperBlock| {
+                // 验证文件系统的有效性
                 assert!(super_block.is_valid(), "Error loading EFS!");
+                // 计算inode相关区域的总块数
                 let inode_total_blocks =
                     super_block.inode_bitmap_blocks + super_block.inode_area_blocks;
+                // 根据超级块信息重建文件系统结构
                 let efs = Self {
                     block_device,
+                    // 重建inode位图，从块1开始
                     inode_bitmap: Bitmap::new(1, super_block.inode_bitmap_blocks as usize),
+                    // 重建数据位图，从inode区域之后开始
                     data_bitmap: Bitmap::new(
                         (1 + inode_total_blocks) as usize,
                         super_block.data_bitmap_blocks as usize,
                     ),
+                    // 设置各区域的起始位置
                     inode_area_start_block: 1 + super_block.inode_bitmap_blocks,
                     data_area_start_block: 1 + inode_total_blocks + super_block.data_bitmap_blocks,
                 };
@@ -127,10 +148,11 @@ impl EasyFileSystem {
     /// # 返回
     /// 根目录的inode
     pub fn root_inode(efs: &Arc<Mutex<Self>>) -> Inode {
+        // 获取块设备引用
         let block_device = Arc::clone(&efs.lock().block_device);
-        // 临时获取efs锁
+        // 临时获取efs锁，查询根inode（编号0）的位置
         let (block_id, block_offset) = efs.lock().get_disk_inode_pos(0);
-        // 释放efs锁
+        // 释放efs锁，创建VFS层的根inode
         Inode::new(block_id, block_offset, Arc::clone(efs), block_device)
     }
     /// 根据inode编号获取其在磁盘上的位置
@@ -141,9 +163,13 @@ impl EasyFileSystem {
     /// # 返回
     /// 元组(块编号, 块内偏移)
     pub fn get_disk_inode_pos(&self, inode_id: u32) -> (u32, usize) {
+        // 获取单个inode的大小
         let inode_size = core::mem::size_of::<DiskInode>();
+        // 计算每个块能容纳多少个inode
         let inodes_per_block = (BLOCK_SZ / inode_size) as u32;
+        // 计算inode所在的块编号
         let block_id = self.inode_area_start_block + inode_id / inodes_per_block;
+        // 返回块编号和块内偏移
         (
             block_id,
             (inode_id % inodes_per_block) as usize * inode_size,
@@ -172,6 +198,7 @@ impl EasyFileSystem {
     /// # 返回
     /// 新分配的数据块编号
     pub fn alloc_data(&mut self) -> u32 {
+        // 从数据位图分配一个数据块，然后转换为实际的磁盘块编号
         self.data_bitmap.alloc(&self.block_device).unwrap() as u32 + self.data_area_start_block
     }
     /// 释放指定的数据块
@@ -179,13 +206,16 @@ impl EasyFileSystem {
     /// # 参数
     /// * `block_id` - 要释放的数据块编号
     pub fn dealloc_data(&mut self, block_id: u32) {
+        // 首先清空数据块的内容
         get_block_cache(block_id as usize, Arc::clone(&self.block_device))
             .lock()
             .modify(0, |data_block: &mut DataBlock| {
+                // 将数据块中的每个字节都设置为0
                 data_block.iter_mut().for_each(|p| {
                     *p = 0;
                 })
             });
+        // 然后在数据位图中标记该块为可用
         self.data_bitmap.dealloc(
             &self.block_device,
             (block_id - self.data_area_start_block) as usize,
