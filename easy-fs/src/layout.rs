@@ -20,14 +20,20 @@ const INDIRECT1_BOUND: usize = DIRECT_BOUND + INODE_INDIRECT1_COUNT;
 /// 二级间接inode索引的上界
 #[allow(unused)]
 const INDIRECT2_BOUND: usize = INDIRECT1_BOUND + INODE_INDIRECT2_COUNT;
-/// 文件系统的超级块
+/// 文件系统的超级块，存储文件系统的元数据信息
 #[repr(C)]
 pub struct SuperBlock {
+    /// 魔数，用于验证文件系统的有效性
     magic: u32,
+    /// 文件系统总块数
     pub total_blocks: u32,
+    /// inode位图占用的块数
     pub inode_bitmap_blocks: u32,
+    /// inode区域占用的块数
     pub inode_area_blocks: u32,
+    /// 数据位图占用的块数
     pub data_bitmap_blocks: u32,
+    /// 数据区域占用的块数
     pub data_area_blocks: u32,
 }
 
@@ -45,6 +51,13 @@ impl Debug for SuperBlock {
 
 impl SuperBlock {
     /// 初始化超级块
+    ///
+    /// # 参数
+    /// * `total_blocks` - 文件系统总块数
+    /// * `inode_bitmap_blocks` - inode位图占用的块数
+    /// * `inode_area_blocks` - inode区域占用的块数
+    /// * `data_bitmap_blocks` - 数据位图占用的块数
+    /// * `data_area_blocks` - 数据区域占用的块数
     pub fn initialize(
         &mut self,
         total_blocks: u32,
@@ -63,6 +76,9 @@ impl SuperBlock {
         }
     }
     /// 使用efs魔数检查超级块是否有效
+    ///
+    /// # 返回
+    /// 如果魔数匹配则返回true，否则返回false
     pub fn is_valid(&self) -> bool {
         self.magic == EFS_MAGIC
     }
@@ -78,19 +94,27 @@ pub enum DiskInodeType {
 type IndirectBlock = [u32; BLOCK_SZ / 4];
 /// 数据块
 type DataBlock = [u8; BLOCK_SZ];
-/// 磁盘inode
+/// 磁盘inode，存储文件或目录的元数据和数据块索引
 #[repr(C)]
 pub struct DiskInode {
+    /// 文件或目录的大小（字节数）
     pub size: u32,
+    /// 直接数据块索引数组
     pub direct: [u32; INODE_DIRECT_COUNT],
+    /// 一级间接块索引
     pub indirect1: u32,
+    /// 二级间接块索引
     pub indirect2: u32,
+    /// inode类型（文件或目录）
     type_: DiskInodeType,
 }
 
 impl DiskInode {
     /// 初始化磁盘inode以及其下的所有直接inode
     /// 一级和二级间接块仅在需要时分配
+    ///
+    /// # 参数
+    /// * `type_` - inode类型（文件或目录）
     pub fn initialize(&mut self, type_: DiskInodeType) {
         self.size = 0;
         self.direct.iter_mut().for_each(|v| *v = 0);
@@ -98,23 +122,38 @@ impl DiskInode {
         self.indirect2 = 0;
         self.type_ = type_;
     }
-    /// 此inode是否为目录
+    /// 检查此inode是否为目录
+    ///
+    /// # 返回
+    /// 如果是目录返回true，否则返回false
     pub fn is_dir(&self) -> bool {
         self.type_ == DiskInodeType::Directory
     }
-    /// 此inode是否为文件
+    /// 检查此inode是否为文件
+    ///
+    /// # 返回
+    /// 如果是文件返回true，否则返回false
     #[allow(unused)]
     pub fn is_file(&self) -> bool {
         self.type_ == DiskInodeType::File
     }
-    /// 返回对应大小的块数
+    /// 返回当前inode大小对应的数据块数
+    ///
+    /// # 返回
+    /// 需要的数据块数量
     pub fn data_blocks(&self) -> u32 {
         Self::_data_blocks(self.size)
     }
     fn _data_blocks(size: u32) -> u32 {
         (size + BLOCK_SZ as u32 - 1) / BLOCK_SZ as u32
     }
-    /// 返回所需的块数，包括一级/二级间接块
+    /// 返回指定大小所需的总块数，包括一级/二级间接块
+    ///
+    /// # 参数
+    /// * `size` - 文件大小（字节）
+    ///
+    /// # 返回
+    /// 总共需要的块数（包括间接块）
     pub fn total_blocks(size: u32) -> u32 {
         let data_blocks = Self::_data_blocks(size) as usize;
         let mut total = data_blocks as usize;
@@ -131,12 +170,25 @@ impl DiskInode {
         }
         total as u32
     }
-    /// 根据新的数据大小获取必须分配的数据块数
+    /// 根据新的数据大小计算需要额外分配的块数
+    ///
+    /// # 参数
+    /// * `new_size` - 新的文件大小
+    ///
+    /// # 返回
+    /// 需要额外分配的块数
     pub fn blocks_num_needed(&self, new_size: u32) -> u32 {
         assert!(new_size >= self.size);
         Self::total_blocks(new_size) - Self::total_blocks(self.size)
     }
-    /// 根据内部编号获取块编号
+    /// 根据内部块编号获取实际的磁盘块编号
+    ///
+    /// # 参数
+    /// * `inner_id` - 文件内部的块编号
+    /// * `block_device` - 块设备引用
+    ///
+    /// # 返回
+    /// 实际的磁盘块编号
     pub fn get_block_id(&self, inner_id: u32, block_device: &Arc<dyn BlockDevice>) -> u32 {
         let inner_id = inner_id as usize;
         if inner_id < INODE_DIRECT_COUNT {
@@ -161,7 +213,12 @@ impl DiskInode {
                 })
         }
     }
-    /// 增加当前磁盘inode的大小
+    /// 增加当前磁盘inode的大小并分配相应的数据块
+    ///
+    /// # 参数
+    /// * `new_size` - 新的文件大小
+    /// * `new_blocks` - 新分配的数据块编号列表
+    /// * `block_device` - 块设备引用
     pub fn increase_size(
         &mut self,
         new_size: u32,
@@ -235,8 +292,14 @@ impl DiskInode {
             });
     }
 
-    /// 将大小清零并返回应该释放的块
-    /// 稍后我们将把块内容清零
+    /// 将inode大小清零并返回应该释放的所有块
+    /// 稍后调用者需要将这些块的内容清零
+    ///
+    /// # 参数
+    /// * `block_device` - 块设备引用
+    ///
+    /// # 返回
+    /// 需要释放的所有块编号列表
     pub fn clear_size(&mut self, block_device: &Arc<dyn BlockDevice>) -> Vec<u32> {
         let mut v: Vec<u32> = Vec::new();
         let mut data_blocks = self.data_blocks() as usize;
@@ -308,7 +371,15 @@ impl DiskInode {
         self.indirect2 = 0;
         v
     }
-    /// 从当前磁盘inode读取数据
+    /// 从当前磁盘inode的指定偏移处读取数据
+    ///
+    /// # 参数
+    /// * `offset` - 读取起始偏移量
+    /// * `buf` - 目标缓冲区
+    /// * `block_device` - 块设备引用
+    ///
+    /// # 返回
+    /// 实际读取的字节数
     pub fn read_at(
         &self,
         offset: usize,
@@ -348,8 +419,16 @@ impl DiskInode {
         }
         read_size
     }
-    /// 向当前磁盘inode写入数据
-    /// 大小必须事先正确调整
+    /// 向当前磁盘inode的指定偏移处写入数据
+    /// 注意：inode的大小必须事先正确调整
+    ///
+    /// # 参数
+    /// * `offset` - 写入起始偏移量
+    /// * `buf` - 源数据缓冲区
+    /// * `block_device` - 块设备引用
+    ///
+    /// # 返回
+    /// 实际写入的字节数
     pub fn write_at(
         &mut self,
         offset: usize,
@@ -388,24 +467,36 @@ impl DiskInode {
         write_size
     }
 }
-/// 目录项
+/// 目录项，存储目录中文件或子目录的信息
 #[repr(C)]
 pub struct DirEntry {
+    /// 文件或目录名称，以null结尾的字符串
     name: [u8; NAME_LENGTH_LIMIT + 1],
+    /// 对应的inode编号
     inode_id: u32,
 }
 /// 目录项的大小
 pub const DIRENT_SZ: usize = 32;
 
 impl DirEntry {
-    /// 创建空目录项
+    /// 创建一个空的目录项
+    ///
+    /// # 返回
+    /// 新的空目录项实例
     pub fn empty() -> Self {
         Self {
             name: [0u8; NAME_LENGTH_LIMIT + 1],
             inode_id: 0,
         }
     }
-    /// 根据名称和inode编号创建目录项
+    /// 根据文件名和inode编号创建目录项
+    ///
+    /// # 参数
+    /// * `name` - 文件或目录名称
+    /// * `inode_id` - 对应的inode编号
+    ///
+    /// # 返回
+    /// 新的目录项实例
     pub fn new(name: &str, inode_id: u32) -> Self {
         let mut bytes = [0u8; NAME_LENGTH_LIMIT + 1];
         bytes[..name.len()].copy_from_slice(name.as_bytes());
@@ -414,20 +505,32 @@ impl DirEntry {
             inode_id,
         }
     }
-    /// 序列化为字节
+    /// 获取目录项的字节表示（只读）
+    ///
+    /// # 返回
+    /// 目录项的字节切片
     pub fn as_bytes(&self) -> &[u8] {
         unsafe { core::slice::from_raw_parts(self as *const _ as usize as *const u8, DIRENT_SZ) }
     }
-    /// 序列化为可变字节
+    /// 获取目录项的可变字节表示
+    ///
+    /// # 返回
+    /// 目录项的可变字节切片
     pub fn as_bytes_mut(&mut self) -> &mut [u8] {
         unsafe { core::slice::from_raw_parts_mut(self as *mut _ as usize as *mut u8, DIRENT_SZ) }
     }
-    /// 获取目录项名称
+    /// 获取目录项的文件名
+    ///
+    /// # 返回
+    /// 文件或目录名称的字符串切片
     pub fn name(&self) -> &str {
         let len = (0usize..).find(|i| self.name[*i] == 0).unwrap();
         core::str::from_utf8(&self.name[..len]).unwrap()
     }
-    /// 获取目录项的inode编号
+    /// 获取目录项对应的inode编号
+    ///
+    /// # 返回
+    /// inode编号
     pub fn inode_id(&self) -> u32 {
         self.inode_id
     }

@@ -5,22 +5,32 @@ use super::{
 use crate::BLOCK_SZ;
 use alloc::sync::Arc;
 use spin::Mutex;
-/// 基于块的简易文件系统
+/// 基于块的简易文件系统，提供文件和目录的基本操作
 pub struct EasyFileSystem {
-    /// 真实设备
+    /// 底层块设备引用
     pub block_device: Arc<dyn BlockDevice>,
-    /// Inode位图
+    /// inode分配位图，管理inode的分配和释放
     pub inode_bitmap: Bitmap,
-    /// 数据位图
+    /// 数据块分配位图，管理数据块的分配和释放
     pub data_bitmap: Bitmap,
+    /// inode区域起始块编号
     inode_area_start_block: u32,
+    /// 数据区域起始块编号
     data_area_start_block: u32,
 }
 
 type DataBlock = [u8; BLOCK_SZ];
 /// 基于块设备的简易文件系统
 impl EasyFileSystem {
-    /// 块大小的数据块
+    /// 在块设备上创建新的文件系统
+    ///
+    /// # 参数
+    /// * `block_device` - 块设备引用
+    /// * `total_blocks` - 总块数
+    /// * `inode_bitmap_blocks` - inode位图占用的块数
+    ///
+    /// # 返回
+    /// 新创建的文件系统实例
     pub fn create(
         block_device: Arc<dyn BlockDevice>,
         total_blocks: u32,
@@ -81,7 +91,13 @@ impl EasyFileSystem {
         block_cache_sync_all();
         Arc::new(Mutex::new(efs))
     }
-    /// 将块设备作为文件系统打开
+    /// 将现有块设备作为文件系统打开
+    ///
+    /// # 参数
+    /// * `block_device` - 包含文件系统的块设备引用
+    ///
+    /// # 返回
+    /// 打开的文件系统实例
     pub fn open(block_device: Arc<dyn BlockDevice>) -> Arc<Mutex<Self>> {
         // 读取超级块
         get_block_cache(0, Arc::clone(&block_device))
@@ -104,6 +120,12 @@ impl EasyFileSystem {
             })
     }
     /// 获取文件系统的根inode
+    ///
+    /// # 参数
+    /// * `efs` - 文件系统引用
+    ///
+    /// # 返回
+    /// 根目录的inode
     pub fn root_inode(efs: &Arc<Mutex<Self>>) -> Inode {
         let block_device = Arc::clone(&efs.lock().block_device);
         // 临时获取efs锁
@@ -111,7 +133,13 @@ impl EasyFileSystem {
         // 释放efs锁
         Inode::new(block_id, block_offset, Arc::clone(efs), block_device)
     }
-    /// 根据编号获取inode
+    /// 根据inode编号获取其在磁盘上的位置
+    ///
+    /// # 参数
+    /// * `inode_id` - inode编号
+    ///
+    /// # 返回
+    /// 元组(块编号, 块内偏移)
     pub fn get_disk_inode_pos(&self, inode_id: u32) -> (u32, usize) {
         let inode_size = core::mem::size_of::<DiskInode>();
         let inodes_per_block = (BLOCK_SZ / inode_size) as u32;
@@ -121,20 +149,35 @@ impl EasyFileSystem {
             (inode_id % inodes_per_block) as usize * inode_size,
         )
     }
-    /// 根据编号获取数据块
+    /// 根据数据块编号获取其在磁盘上的实际块编号
+    ///
+    /// # 参数
+    /// * `data_block_id` - 数据块编号
+    ///
+    /// # 返回
+    /// 实际的磁盘块编号
     pub fn get_data_block_id(&self, data_block_id: u32) -> u32 {
         self.data_area_start_block + data_block_id
     }
     /// 分配新的inode
+    ///
+    /// # 返回
+    /// 新分配的inode编号
     pub fn alloc_inode(&mut self) -> u32 {
         self.inode_bitmap.alloc(&self.block_device).unwrap() as u32
     }
 
-    /// 分配数据块
+    /// 分配新的数据块
+    ///
+    /// # 返回
+    /// 新分配的数据块编号
     pub fn alloc_data(&mut self) -> u32 {
         self.data_bitmap.alloc(&self.block_device).unwrap() as u32 + self.data_area_start_block
     }
-    /// 释放数据块
+    /// 释放指定的数据块
+    ///
+    /// # 参数
+    /// * `block_id` - 要释放的数据块编号
     pub fn dealloc_data(&mut self, block_id: u32) {
         get_block_cache(block_id as usize, Arc::clone(&self.block_device))
             .lock()

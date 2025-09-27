@@ -6,16 +6,29 @@ use alloc::string::String;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 use spin::{Mutex, MutexGuard};
-/// easy-fs上的虚拟文件系统层
+/// easy-fs上的虚拟文件系统层，提供文件和目录操作的高级接口
 pub struct Inode {
+    /// inode所在的块编号
     block_id: usize,
+    /// inode在块内的偏移量
     block_offset: usize,
+    /// 文件系统引用
     fs: Arc<Mutex<EasyFileSystem>>,
+    /// 块设备引用
     block_device: Arc<dyn BlockDevice>,
 }
 
 impl Inode {
-    /// 创建vfs inode
+    /// 创建新的VFS inode实例
+    ///
+    /// # 参数
+    /// * `block_id` - inode所在的块编号
+    /// * `block_offset` - inode在块内的偏移量
+    /// * `fs` - 文件系统引用
+    /// * `block_device` - 块设备引用
+    ///
+    /// # 返回
+    /// 新的Inode实例
     pub fn new(
         block_id: u32,
         block_offset: usize,
@@ -29,19 +42,38 @@ impl Inode {
             block_device,
         }
     }
-    /// 在磁盘inode上调用函数来读取它
+    /// 在磁盘inode上调用函数来读取数据
+    ///
+    /// # 参数
+    /// * `f` - 读取回调函数
+    ///
+    /// # 返回
+    /// 回调函数的返回值
     fn read_disk_inode<V>(&self, f: impl FnOnce(&DiskInode) -> V) -> V {
         get_block_cache(self.block_id, Arc::clone(&self.block_device))
             .lock()
             .read(self.block_offset, f)
     }
-    /// 在磁盘inode上调用函数来修改它
+    /// 在磁盘inode上调用函数来修改数据
+    ///
+    /// # 参数
+    /// * `f` - 修改回调函数
+    ///
+    /// # 返回
+    /// 回调函数的返回值
     fn modify_disk_inode<V>(&self, f: impl FnOnce(&mut DiskInode) -> V) -> V {
         get_block_cache(self.block_id, Arc::clone(&self.block_device))
             .lock()
             .modify(self.block_offset, f)
     }
-    /// 根据名称在磁盘inode下查找inode
+    /// 在目录中根据名称查找inode编号
+    ///
+    /// # 参数
+    /// * `name` - 要查找的文件或目录名
+    /// * `disk_inode` - 目录的磁盘inode
+    ///
+    /// # 返回
+    /// 找到时返回inode编号，否则返回None
     fn find_inode_id(&self, name: &str, disk_inode: &DiskInode) -> Option<u32> {
         // 断言它是一个目录
         assert!(disk_inode.is_dir());
@@ -58,7 +90,13 @@ impl Inode {
         }
         None
     }
-    /// 根据名称在当前inode下查找inode
+    /// 在当前目录中根据名称查找子文件或子目录
+    ///
+    /// # 参数
+    /// * `name` - 要查找的文件或目录名
+    ///
+    /// # 返回
+    /// 找到时返回对应的Inode，否则返回None
     pub fn find(&self, name: &str) -> Option<Arc<Inode>> {
         let fs = self.fs.lock();
         self.read_disk_inode(|disk_inode| {
@@ -73,7 +111,12 @@ impl Inode {
             })
         })
     }
-    /// 增加磁盘inode的大小
+    /// 增加磁盘inode的大小并分配必要的数据块
+    ///
+    /// # 参数
+    /// * `new_size` - 新的文件大小
+    /// * `disk_inode` - 要修改的磁盘inode
+    /// * `fs` - 文件系统的可变引用
     fn increase_size(
         &self,
         new_size: u32,
@@ -90,7 +133,13 @@ impl Inode {
         }
         disk_inode.increase_size(new_size, v, &self.block_device);
     }
-    /// 根据名称在当前inode下创建inode
+    /// 在当前目录中创建新文件
+    ///
+    /// # 参数
+    /// * `name` - 新文件的名称
+    ///
+    /// # 返回
+    /// 成功时返回新文件的Inode，如果文件已存在则返回None
     pub fn create(&self, name: &str) -> Option<Arc<Inode>> {
         let mut fs = self.fs.lock();
         let op = |root_inode: &DiskInode| {
@@ -138,7 +187,10 @@ impl Inode {
         )))
         // 编译器自动释放efs锁
     }
-    /// 列出当前inode下的inode
+    /// 列出当前目录中的所有文件和子目录
+    ///
+    /// # 返回
+    /// 包含所有文件和目录名称的字符串向量
     pub fn ls(&self) -> Vec<String> {
         let _fs = self.fs.lock();
         self.read_disk_inode(|disk_inode| {
@@ -155,12 +207,26 @@ impl Inode {
             v
         })
     }
-    /// 从当前inode读取数据
+    /// 从当前文件的指定偏移处读取数据
+    ///
+    /// # 参数
+    /// * `offset` - 读取起始偏移量
+    /// * `buf` - 目标缓冲区
+    ///
+    /// # 返回
+    /// 实际读取的字节数
     pub fn read_at(&self, offset: usize, buf: &mut [u8]) -> usize {
         let _fs = self.fs.lock();
         self.read_disk_inode(|disk_inode| disk_inode.read_at(offset, buf, &self.block_device))
     }
-    /// 向当前inode写入数据
+    /// 向当前文件的指定偏移处写入数据
+    ///
+    /// # 参数
+    /// * `offset` - 写入起始偏移量
+    /// * `buf` - 源数据缓冲区
+    ///
+    /// # 返回
+    /// 实际写入的字节数
     pub fn write_at(&self, offset: usize, buf: &[u8]) -> usize {
         let mut fs = self.fs.lock();
         let size = self.modify_disk_inode(|disk_inode| {
@@ -170,7 +236,7 @@ impl Inode {
         block_cache_sync_all();
         size
     }
-    /// 清除当前inode中的数据
+    /// 清除当前文件中的所有数据并释放相关的数据块
     pub fn clear(&self) {
         let mut fs = self.fs.lock();
         self.modify_disk_inode(|disk_inode| {
