@@ -2,6 +2,7 @@ use super::{get_block_cache, BlockDevice, BLOCK_SZ};
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::fmt::{Debug, Formatter, Result};
+use core::sync::atomic::{compiler_fence, Ordering};
 
 /// 用于完整性检查的魔数
 const EFS_MAGIC: u32 = 0x3b800001;
@@ -119,7 +120,10 @@ impl DiskInode {
         // 初始化文件大小为0
         self.size = 0;
         // 清空所有直接块索引
-        self.direct.iter_mut().for_each(|v| *v = 0);
+        self.direct.iter_mut().for_each(|v| {
+            compiler_fence(Ordering::SeqCst);
+            *v = 0;
+        });
         // 清空间接块索引
         self.indirect1 = 0;
         self.indirect2 = 0;
@@ -608,7 +612,12 @@ impl DirEntry {
     /// 文件或目录名称的字符串切片
     pub fn name(&self) -> &str {
         // 查找字符串结束位置（第一个null字节）
-        let len = (0usize..).find(|i| self.name[*i] == 0).unwrap();
+        let len = (0usize..)
+            .find(|i| {
+                compiler_fence(Ordering::SeqCst);
+                self.name[*i] == 0
+            })
+            .unwrap();
         // 将字节数组转换为字符串切片
         core::str::from_utf8(&self.name[..len]).unwrap()
     }

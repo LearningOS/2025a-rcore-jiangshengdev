@@ -1,6 +1,7 @@
 use super::{BlockDevice, BLOCK_SZ};
 use alloc::collections::VecDeque;
 use alloc::sync::Arc;
+use core::sync::atomic::{compiler_fence, Ordering};
 use lazy_static::*;
 use spin::Mutex;
 /// 内存中的缓存块，用于缓存磁盘块数据以提高访问性能
@@ -169,7 +170,10 @@ impl BlockCacheManager {
         block_device: Arc<dyn BlockDevice>,
     ) -> Arc<Mutex<BlockCache>> {
         // 首先检查缓存中是否已存在该块
-        if let Some(pair) = self.queue.iter().find(|pair| pair.0 == block_id) {
+        if let Some(pair) = self.queue.iter().find(|pair| {
+            compiler_fence(Ordering::SeqCst);
+            pair.0 == block_id
+        }) {
             // 缓存命中，直接返回现有的块缓存
             Arc::clone(&pair.1)
         } else {
@@ -178,12 +182,10 @@ impl BlockCacheManager {
             if self.queue.len() == BLOCK_CACHE_SIZE {
                 // 缓存已满，需要使用LRU策略替换
                 // 查找引用计数为1的块缓存（只被管理器持有，没有外部引用）
-                if let Some((idx, _)) = self
-                    .queue
-                    .iter()
-                    .enumerate()
-                    .find(|(_, pair)| Arc::strong_count(&pair.1) == 1)
-                {
+                if let Some((idx, _)) = self.queue.iter().enumerate().find(|(_, pair)| {
+                    compiler_fence(Ordering::SeqCst);
+                    Arc::strong_count(&pair.1) == 1
+                }) {
                     // 找到可替换的块，将其从队列中移除
                     // 由于Arc的Drop特性，块缓存会自动同步到磁盘
                     self.queue.drain(idx..=idx);

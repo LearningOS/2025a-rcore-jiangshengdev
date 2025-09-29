@@ -5,6 +5,7 @@ use super::{
 use alloc::string::String;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
+use core::sync::atomic::{compiler_fence, Ordering};
 use spin::{Mutex, MutexGuard};
 /// easy-fs上的虚拟文件系统层，提供文件和目录操作的高级接口
 pub struct Inode {
@@ -257,7 +258,10 @@ impl Inode {
         // 获取文件系统锁（只读）
         let _fs = self.fs.lock();
         // 委托给磁盘inode的读取方法
-        self.read_disk_inode(|disk_inode| disk_inode.read_at(offset, buf, &self.block_device))
+        self.read_disk_inode(|disk_inode| {
+            compiler_fence(Ordering::SeqCst);
+            disk_inode.read_at(offset, buf, &self.block_device)
+        })
     }
     /// 向当前文件的指定偏移处写入数据
     ///

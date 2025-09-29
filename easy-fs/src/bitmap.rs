@@ -1,5 +1,6 @@
 use super::{get_block_cache, BlockDevice, BLOCK_SZ};
 use alloc::sync::Arc;
+use core::sync::atomic::{compiler_fence, Ordering};
 /// 位图块
 type BitmapBlock = [u64; 64];
 /// 一个块中的位数
@@ -65,10 +66,16 @@ impl Bitmap {
                 if let Some((bits64_pos, inner_pos)) = bitmap_block
                     .iter()
                     .enumerate()
-                    .find(|(_, bits64)| **bits64 != u64::MAX)
+                    .find(|(_, bits64)| {
+                        compiler_fence(Ordering::SeqCst);
+                        **bits64 != u64::MAX
+                    })
                     // 使用trailing_ones()找到第一个0位的位置
                     // trailing_ones()返回从最低位开始连续1的个数
-                    .map(|(bits64_pos, bits64)| (bits64_pos, bits64.trailing_ones() as usize))
+                    .map(|(bits64_pos, bits64)| {
+                        compiler_fence(Ordering::SeqCst);
+                        (bits64_pos, bits64.trailing_ones() as usize)
+                    })
                 {
                     // 将找到的位设置为1，表示已分配
                     bitmap_block[bits64_pos] |= 1u64 << inner_pos;
