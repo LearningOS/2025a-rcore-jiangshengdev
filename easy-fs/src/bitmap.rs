@@ -73,7 +73,8 @@ impl Bitmap {
                     // 将找到的位设置为1，表示已分配
                     bitmap_block[bits64_pos] |= 1u64 << inner_pos;
                     // 计算全局位索引：块偏移 + 64位段偏移 + 段内偏移
-                    Some(block_id * BLOCK_BITS + bits64_pos * 64 + inner_pos as usize)
+                    let global_bit_index = block_id * BLOCK_BITS + bits64_pos * 64 + inner_pos;
+                    Some(global_bit_index)
                 } else {
                     // 当前块已满，返回None继续查找下一个块
                     None
@@ -95,8 +96,10 @@ impl Bitmap {
     pub fn dealloc(&self, block_device: &Arc<dyn BlockDevice>, bit: usize) {
         // 将全局位索引分解为具体的位置信息
         let (block_pos, bits64_pos, inner_pos) = decomposition(bit);
+        // 计算位图块的块编号
+        let bitmap_block_id = block_pos + self.start_block_id;
         // 获取对应位图块的缓存
-        get_block_cache(block_pos + self.start_block_id, Arc::clone(block_device))
+        get_block_cache(bitmap_block_id, Arc::clone(block_device))
             .lock()
             .modify(0, |bitmap_block: &mut BitmapBlock| {
                 // 确保要释放的位确实是已分配状态（值为1）

@@ -171,8 +171,9 @@ impl DiskInode {
         if data_blocks > INDIRECT1_BOUND {
             total += 1;
             // 计算需要的子一级间接块数量
-            total +=
+            let indirect1_blocks_needed =
                 (data_blocks - INDIRECT1_BOUND + INODE_INDIRECT1_COUNT - 1) / INODE_INDIRECT1_COUNT;
+            total += indirect1_blocks_needed;
         }
         total as u32
     }
@@ -461,8 +462,7 @@ impl DiskInode {
         let mut read_size = 0usize;
         loop {
             // 计算当前块的结束位置
-            let mut end_current_block = (start / BLOCK_SZ + 1) * BLOCK_SZ;
-            end_current_block = end_current_block.min(end);
+            let end_current_block = ((start / BLOCK_SZ + 1) * BLOCK_SZ).min(end);
             // 计算当前块需要读取的字节数
             let block_read_size = end_current_block - start;
             // 获取目标缓冲区的切片
@@ -517,8 +517,7 @@ impl DiskInode {
         let mut write_size = 0usize;
         loop {
             // 计算当前块的结束位置
-            let mut end_current_block = (start / BLOCK_SZ + 1) * BLOCK_SZ;
-            end_current_block = end_current_block.min(end);
+            let end_current_block = ((start / BLOCK_SZ + 1) * BLOCK_SZ).min(end);
             // 计算当前块需要写入的字节数
             let block_write_size = end_current_block - start;
             // 获取数据块并写入数据

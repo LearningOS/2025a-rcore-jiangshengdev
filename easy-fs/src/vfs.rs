@@ -83,9 +83,11 @@ impl Inode {
         let mut dirent = DirEntry::empty();
         // 遍历目录中的每个目录项
         for i in 0..file_count {
+            // 计算目录项在磁盘中的偏移
+            let offset = DIRENT_SZ * i;
             // 从磁盘读取第i个目录项的数据
             assert_eq!(
-                disk_inode.read_at(DIRENT_SZ * i, dirent.as_bytes_mut(), &self.block_device,),
+                disk_inode.read_at(offset, dirent.as_bytes_mut(), &self.block_device,),
                 DIRENT_SZ,
             );
             // 比较目录项名称与目标名称
@@ -195,12 +197,10 @@ impl Inode {
             self.increase_size(new_size as u32, root_inode, &mut fs);
             // 创建新的目录项
             let dirent = DirEntry::new(name, new_inode_id);
+            // 计算写入位置的偏移
+            let write_offset = file_count * DIRENT_SZ;
             // 将目录项写入目录的末尾
-            root_inode.write_at(
-                file_count * DIRENT_SZ,
-                dirent.as_bytes(),
-                &self.block_device,
-            );
+            root_inode.write_at(write_offset, dirent.as_bytes(), &self.block_device);
         });
 
         // 第四步：获取新文件inode的位置信息并创建VFS inode
@@ -232,9 +232,11 @@ impl Inode {
             for i in 0..file_count {
                 // 创建临时目录项
                 let mut dirent = DirEntry::empty();
+                // 计算目录项偏移
+                let offset = i * DIRENT_SZ;
                 // 读取目录项数据
                 assert_eq!(
-                    disk_inode.read_at(i * DIRENT_SZ, dirent.as_bytes_mut(), &self.block_device,),
+                    disk_inode.read_at(offset, dirent.as_bytes_mut(), &self.block_device,),
                     DIRENT_SZ,
                 );
                 // 将文件名添加到结果中
