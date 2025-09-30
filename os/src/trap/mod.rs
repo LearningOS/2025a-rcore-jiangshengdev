@@ -1,16 +1,14 @@
-//! Trap handling functionality
+//! 陷阱处理功能
 //!
-//! For rCore, we have a single trap entry point, namely `__alltraps`. At
-//! initialization in [`init()`], we set the `stvec` CSR to point to it.
+//! 对于 rCore，我们有一个单一的陷阱入口点，即 `__alltraps`。在
+//! [`init()`] 初始化时，我们将 `stvec` CSR 设置为指向它。
 //!
-//! All traps go through `__alltraps`, which is defined in `trap.S`. The
-//! assembly language code does just enough work restore the kernel space
-//! context, ensuring that Rust code safely runs, and transfers control to
-//! [`trap_handler()`].
+//! 所有陷阱都通过 `__alltraps` 处理，它在 `trap.S` 中定义。汇编
+//! 语言代码只做足够的工作来恢复内核空间上下文，确保 Rust 代码安全
+//! 运行，并将控制权转移给 [`trap_handler()`]。
 //!
-//! It then calls different functionality based on what exactly the exception
-//! was. For example, timer interrupts trigger task preemption, and syscalls go
-//! to [`syscall()`].
+//! 然后它根据具体的异常类型调用不同的功能。例如，定时器中断触发
+//! 任务抢占，系统调用转到 [`syscall()`]。
 
 mod context;
 
@@ -29,7 +27,7 @@ use riscv::register::{
 
 global_asm!(include_str!("trap.S"));
 
-/// Initialize trap handling
+/// 初始化陷阱处理
 pub fn init() {
     set_kernel_trap_entry();
 }
@@ -46,14 +44,14 @@ fn set_user_trap_entry() {
     }
 }
 
-/// enable timer interrupt in supervisor mode
+/// 在监管者模式下启用定时器中断
 pub fn enable_timer_interrupt() {
     unsafe {
         sie::set_stimer();
     }
 }
 
-/// trap handler
+/// 陷阱处理程序
 #[no_mangle]
 pub fn trap_handler() -> ! {
     set_kernel_trap_entry();
@@ -62,12 +60,12 @@ pub fn trap_handler() -> ! {
     // trace!("into {:?}", scause.cause());
     match scause.cause() {
         Trap::Exception(Exception::UserEnvCall) => {
-            // jump to next instruction anyway
+            // 无论如何都跳转到下一条指令
             let mut cx = current_trap_cx();
             cx.sepc += 4;
-            // get system call return value
+            // 获取系统调用返回值
             let result = syscall(cx.x[17], [cx.x[10], cx.x[11], cx.x[12], cx.x[13]]);
-            // cx is changed during sys_exec, so we have to call it again
+            // cx 在 sys_exec 期间被改变，所以我们必须再次调用它
             cx = current_trap_cx();
             cx.x[10] = result as usize;
         }
@@ -83,12 +81,12 @@ pub fn trap_handler() -> ! {
                 stval,
                 current_trap_cx().sepc,
             );
-            // page fault exit code
+            // 页面错误退出码
             exit_current_and_run_next(-2);
         }
         Trap::Exception(Exception::IllegalInstruction) => {
             println!("[kernel] IllegalInstruction in application, kernel killed it.");
-            // illegal instruction exit code
+            // 非法指令退出码
             exit_current_and_run_next(-3);
         }
         Trap::Interrupt(Interrupt::SupervisorTimer) => {
@@ -103,15 +101,15 @@ pub fn trap_handler() -> ! {
             );
         }
     }
-    //println!("before trap_return");
+    //println!("trap_return 之前");
     trap_return();
 }
 
 #[no_mangle]
-/// return to user space
-/// set the new addr of __restore asm function in TRAMPOLINE page,
-/// set the reg a0 = trap_cx_ptr, reg a1 = phy addr of usr page table,
-/// finally, jump to new addr of __restore asm function
+/// 返回用户空间
+/// 在 TRAMPOLINE 页面中设置 __restore 汇编函数的新地址，
+/// 设置寄存器 a0 = trap_cx_ptr，寄存器 a1 = 用户页表的物理地址，
+/// 最后，跳转到 __restore 汇编函数的新地址
 pub fn trap_return() -> ! {
     set_user_trap_entry();
     let trap_cx_ptr = TRAP_CONTEXT_BASE;
@@ -121,7 +119,7 @@ pub fn trap_return() -> ! {
         fn __restore();
     }
     let restore_va = __restore as usize - __alltraps as usize + TRAMPOLINE;
-    // trace!("[kernel] trap_return: ..before return");
+    // trace!("[kernel] trap_return: ..返回之前");
     unsafe {
         asm!(
             "fence.i",
@@ -135,9 +133,9 @@ pub fn trap_return() -> ! {
 }
 
 #[no_mangle]
-/// handle trap from kernel
-/// Unimplement: traps/interrupts/exceptions from kernel mode
-/// Todo: Chapter 9: I/O device
+/// 处理来自内核的陷阱
+/// 未实现：来自内核模式的陷阱/中断/异常
+/// 待办：第9章：I/O 设备
 pub fn trap_from_kernel() -> ! {
     use riscv::register::sepc;
     trace!("stval = {:#x}, sepc = {:#x}", stval::read(), sepc::read());

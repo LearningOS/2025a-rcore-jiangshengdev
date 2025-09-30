@@ -1,4 +1,4 @@
-//! File and filesystem-related syscalls
+//! 文件和文件系统相关的系统调用
 use crate::fs::{open_file, OpenFlags, Stat};
 use crate::mm::{translated_byte_buffer, translated_str, UserBuffer};
 use crate::task::{current_task, current_user_token};
@@ -16,7 +16,7 @@ pub fn sys_write(fd: usize, buf: *const u8, len: usize) -> isize {
             return -1;
         }
         let file = file.clone();
-        // release current task TCB manually to avoid multi-borrow
+        // 手动释放当前任务 TCB 以避免多重借用
         drop(inner);
         file.write(UserBuffer::new(translated_byte_buffer(token, buf, len))) as isize
     } else {
@@ -37,7 +37,7 @@ pub fn sys_read(fd: usize, buf: *const u8, len: usize) -> isize {
         if !file.readable() {
             return -1;
         }
-        // release current task TCB manually to avoid multi-borrow
+        // 手动释放当前任务 TCB 以避免多重借用
         drop(inner);
         trace!("kernel: sys_read .. file.read");
         file.read(UserBuffer::new(translated_byte_buffer(token, buf, len))) as isize
@@ -75,7 +75,7 @@ pub fn sys_close(fd: usize) -> isize {
     0
 }
 
-/// YOUR JOB: Implement fstat.
+/// 你的任务：实现 fstat。
 pub fn sys_fstat(_fd: usize, _st: *mut Stat) -> isize {
     trace!(
         "kernel:pid[{}] sys_fstat NOT IMPLEMENTED",
@@ -84,7 +84,7 @@ pub fn sys_fstat(_fd: usize, _st: *mut Stat) -> isize {
     -1
 }
 
-/// YOUR JOB: Implement linkat.
+/// 你的任务：实现 linkat。
 pub fn sys_linkat(_old_name: *const u8, _new_name: *const u8) -> isize {
     trace!(
         "kernel:pid[{}] sys_linkat NOT IMPLEMENTED",
@@ -93,7 +93,7 @@ pub fn sys_linkat(_old_name: *const u8, _new_name: *const u8) -> isize {
     -1
 }
 
-/// YOUR JOB: Implement unlinkat.
+/// 你的任务：实现 unlinkat。
 pub fn sys_unlinkat(_name: *const u8) -> isize {
     trace!(
         "kernel:pid[{}] sys_unlinkat NOT IMPLEMENTED",
