@@ -1,13 +1,13 @@
-//!Stdin & Stdout
+//! 标准输入和标准输出
 use super::File;
 use crate::mm::UserBuffer;
 use crate::sbi::console_getchar;
 use crate::task::suspend_current_and_run_next;
 
-/// stdin file for getting chars from console
+/// 从控制台获取字符的标准输入文件
 pub struct Stdin;
 
-/// stdout file for putting chars to console
+/// 向控制台输出字符的标准输出文件
 pub struct Stdout;
 
 impl File for Stdin {
@@ -19,7 +19,7 @@ impl File for Stdin {
     }
     fn read(&self, mut user_buf: UserBuffer) -> usize {
         assert_eq!(user_buf.len(), 1);
-        // busy loop
+        // 忙等循环
         let mut c: usize;
         loop {
             c = console_getchar();
