@@ -100,6 +100,15 @@ impl DiskInode {
         self.type_ = type_;
         self.nlink = 1;
     }
+    /// 将 inode 元数据重置为未使用状态
+    pub fn reset(&mut self) {
+        self.size = 0;
+        self.direct.iter_mut().for_each(|v| *v = 0);
+        self.indirect1 = 0;
+        self.indirect2 = 0;
+        self.type_ = DiskInodeType::File;
+        self.nlink = 0;
+    }
     /// Whether this inode is a directory
     pub fn is_dir(&self) -> bool {
         self.type_ == DiskInodeType::Directory

@@ -148,13 +148,8 @@ impl EasyFileSystem {
         get_block_cache(block_id as usize, Arc::clone(&self.block_device))
             .lock()
             .modify(block_offset, |disk_inode: &mut DiskInode| {
-                // 清空 inode 元数据并复位所有块指针
-                disk_inode.size = 0;
-                disk_inode.direct.iter_mut().for_each(|v| *v = 0);
-                disk_inode.indirect1 = 0;
-                disk_inode.indirect2 = 0;
-                disk_inode.set_type(DiskInodeType::File);
-                disk_inode.set_nlink(0);
+                // 调用 reset 统一重置 inode 的所有元数据字段
+                disk_inode.reset();
             });
         // 释放 inode 位图占用
         self.inode_bitmap

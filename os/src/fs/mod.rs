@@ -76,5 +76,5 @@ bitflags! {
     }
 }
 
-pub use inode::{link_file, list_apps, open_file, unlink_file, OSInode, OpenFlags};
+pub use inode::{link_file, list_apps, open_file, unlink_file, OpenFlags};
 pub use stdio::{Stdin, Stdout};
