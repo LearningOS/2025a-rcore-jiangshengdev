@@ -5,7 +5,7 @@ use super::{
 use alloc::string::String;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
-use spin::{Mutex, MutexGuard};
+use spin::Mutex;
 /// Virtual filesystem layer over easy-fs
 pub struct Inode {
     block_id: usize,
@@ -41,6 +41,21 @@ impl Inode {
             .lock()
             .modify(self.block_offset, f)
     }
+
+    /// 在持有可写文件系统锁的情况下修改磁盘 inode
+    fn modify_disk_inode_with_fs<V>(
+        &self,
+        f: impl FnOnce(&mut DiskInode, &mut EasyFileSystem) -> V,
+    ) -> V {
+        // 获取文件系统互斥锁以进行修改
+        let mut fs = self.fs.lock();
+        get_block_cache(self.block_id, Arc::clone(&self.block_device))
+            .lock()
+            .modify(self.block_offset, |disk_inode: &mut DiskInode| {
+                // 将磁盘 inode 可变引用与文件系统一起传入回调
+                f(disk_inode, &mut fs)
+            })
+    }
     /// Find inode under a disk inode by name
     fn find_inode_id(&self, name: &str, disk_inode: &DiskInode) -> Option<u32> {
         // assert it is a directory
@@ -58,6 +73,7 @@ impl Inode {
         }
         None
     }
+
     /// Find inode under current inode by name
     pub fn find(&self, name: &str) -> Option<Arc<Inode>> {
         let fs = self.fs.lock();
@@ -74,12 +90,7 @@ impl Inode {
         })
     }
     /// Increase the size of a disk inode
-    fn increase_size(
-        &self,
-        new_size: u32,
-        disk_inode: &mut DiskInode,
-        fs: &mut MutexGuard<EasyFileSystem>,
-    ) {
+    fn increase_size(&self, new_size: u32, disk_inode: &mut DiskInode, fs: &mut EasyFileSystem) {
         if new_size < disk_inode.size {
             return;
         }
@@ -138,6 +149,148 @@ impl Inode {
         )))
         // release efs lock automatically by compiler
     }
+
+    /// 返回当前 inode 在文件系统中的编号
+    pub fn inode_id(&self) -> u32 {
+        // 锁定文件系统以查询 inode 位置信息
+        let fs = self.fs.lock();
+        fs.get_inode_id(self.block_id as u32, self.block_offset)
+    }
+
+    /// 判断当前 inode 是否代表目录
+    pub fn is_dir(&self) -> bool {
+        let _fs = self.fs.lock();
+        // 读取磁盘 inode 判断类型
+        self.read_disk_inode(|disk_inode| disk_inode.is_dir())
+    }
+
+    /// 获取当前 inode 的硬链接数量
+    pub fn nlink(&self) -> u32 {
+        let _fs = self.fs.lock();
+        // 读取磁盘 inode 中的引用计数
+        self.read_disk_inode(|disk_inode| disk_inode.nlink())
+    }
+
+    /// 在当前目录下为目标 inode 创建新的硬链接目录项
+    pub fn hard_link(&self, name: &str, target: &Arc<Inode>) -> bool {
+        // 目录自身不能作为硬链接目标
+        if target.is_dir() {
+            return false;
+        }
+        // 记录目标 inode 的编号
+        let target_id = target.inode_id();
+        let appended = self.modify_disk_inode_with_fs(|disk_inode, fs| {
+            // 非目录节点不支持写入目录项
+            if !disk_inode.is_dir() {
+                return false;
+            }
+            // 检查重复的文件名
+            if self.find_inode_id(name, disk_inode).is_some() {
+                return false;
+            }
+            // 计算目录项数量并扩展目录空间
+            let file_count = (disk_inode.size as usize) / DIRENT_SZ;
+            let new_size = (file_count + 1) * DIRENT_SZ;
+            self.increase_size(new_size as u32, disk_inode, fs);
+            // 写入新的目录项链接到目标 inode
+            let dirent = DirEntry::new(name, target_id);
+            disk_inode.write_at(
+                file_count * DIRENT_SZ,
+                dirent.as_bytes(),
+                &self.block_device,
+            );
+            true
+        });
+        if appended {
+            // 成功写入目录项后增加目标文件的硬链接计数
+            target.modify_disk_inode(|disk_inode| {
+                disk_inode.increase_nlink();
+            });
+            // 同步块缓存确保元数据落盘
+            block_cache_sync_all();
+            true
+        } else {
+            false
+        }
+    }
+
+    /// 按名称移除目录项并返回被删除 inode 的编号
+    pub fn remove_dirent(&self, name: &str) -> Option<u32> {
+        let removed = self.modify_disk_inode_with_fs(|disk_inode, fs| {
+            // 仅目录 inode 才能维护目录项
+            if !disk_inode.is_dir() {
+                return None;
+            }
+            // 统计目录项数量并判断空目录
+            let file_count = (disk_inode.size as usize) / DIRENT_SZ;
+            if file_count == 0 {
+                return None;
+            }
+            // 遍历目录项寻找匹配名称
+            let mut target_index = None;
+            let mut dirent = DirEntry::empty();
+            for i in 0..file_count {
+                assert_eq!(
+                    disk_inode.read_at(i * DIRENT_SZ, dirent.as_bytes_mut(), &self.block_device,),
+                    DIRENT_SZ,
+                );
+                if dirent.name() == name {
+                    target_index = Some(i);
+                    break;
+                }
+            }
+            let Some(idx) = target_index else {
+                return None;
+            };
+            // 记录被删除目录项的 inode 编号
+            let inode_id = dirent.inode_id();
+            let last_index = file_count - 1;
+            if idx != last_index {
+                // 用末尾目录项覆盖空洞
+                let mut tail_dirent = DirEntry::empty();
+                assert_eq!(
+                    disk_inode.read_at(
+                        last_index * DIRENT_SZ,
+                        tail_dirent.as_bytes_mut(),
+                        &self.block_device,
+                    ),
+                    DIRENT_SZ,
+                );
+                disk_inode.write_at(idx * DIRENT_SZ, tail_dirent.as_bytes(), &self.block_device);
+            }
+            // 将末尾目录项清零
+            let empty = DirEntry::empty();
+            disk_inode.write_at(last_index * DIRENT_SZ, empty.as_bytes(), &self.block_device);
+            // 调整文件大小并释放不再使用的块
+            let new_size = (file_count - 1) * DIRENT_SZ;
+            let freed_blocks = disk_inode.truncate(new_size as u32, &self.block_device);
+            for block in freed_blocks {
+                fs.dealloc_data(block);
+            }
+            Some(inode_id)
+        });
+        if removed.is_some() {
+            // 刷新缓存确保目录更改生效
+            block_cache_sync_all();
+        }
+        removed
+    }
+
+    /// 回收 inode 的元数据资源
+    pub fn dealloc(&self) {
+        // 获取当前 inode 的编号用于位图回收
+        let inode_id = self.inode_id();
+        let mut fs = self.fs.lock();
+        fs.dealloc_inode(inode_id);
+        // 同步缓存以持久化位图更新
+        block_cache_sync_all();
+    }
+
+    /// 将硬链接数量减一并返回剩余的链接数
+    pub fn decrease_nlink(&self) -> u32 {
+        // 修改磁盘 inode 的引用计数
+        self.modify_disk_inode(|disk_inode| disk_inode.decrease_nlink())
+    }
     /// List inodes under current inode
     pub fn ls(&self) -> Vec<String> {
         let _fs = self.fs.lock();
@@ -150,7 +303,10 @@ impl Inode {
                     disk_inode.read_at(i * DIRENT_SZ, dirent.as_bytes_mut(), &self.block_device,),
                     DIRENT_SZ,
                 );
-                v.push(String::from(dirent.name()));
+                let name = dirent.name();
+                if !name.is_empty() {
+                    v.push(String::from(name));
+                }
             }
             v
         })

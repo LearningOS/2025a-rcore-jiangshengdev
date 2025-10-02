@@ -1,6 +1,6 @@
 //! File and filesystem-related syscalls
-use crate::fs::{open_file, OpenFlags, Stat};
-use crate::mm::{translated_byte_buffer, translated_str, UserBuffer};
+use crate::fs::{link_file, open_file, unlink_file, OpenFlags, Stat};
+use crate::mm::{translated_byte_buffer, translated_str, write_user_struct, UserBuffer};
 use crate::task::{current_task, current_user_token};
 
 pub fn sys_write(fd: usize, buf: *const u8, len: usize) -> isize {
@@ -75,29 +75,63 @@ pub fn sys_close(fd: usize) -> isize {
     0
 }
 
-/// YOUR JOB: Implement fstat.
-pub fn sys_fstat(_fd: usize, _st: *mut Stat) -> isize {
-    trace!(
-        "kernel:pid[{}] sys_fstat NOT IMPLEMENTED",
-        current_task().unwrap().pid.0
-    );
-    -1
+/// 获取指定文件描述符对应文件的状态信息
+pub fn sys_fstat(fd: usize, st: *mut Stat) -> isize {
+    trace!("kernel:pid[{}] sys_fstat", current_task().unwrap().pid.0);
+    // 获取当前任务的文件描述符表
+    let task = current_task().unwrap();
+    let inner = task.inner_exclusive_access();
+    if fd >= inner.fd_table.len() {
+        return -1;
+    }
+    // 克隆文件句柄以释放锁
+    let file = inner.fd_table[fd].clone();
+    drop(inner);
+    let Some(file) = file else {
+        return -1;
+    };
+    let Some(info) = file.stat() else {
+        return -1;
+    };
+    // 构造返回给用户态的 Stat 结构
+    let stat = Stat::new(0, info.ino, info.mode, info.nlink);
+    let token = current_user_token();
+    // 将结构体写入用户空间
+    write_user_struct(token, st, stat);
+    0
 }
 
-/// YOUR JOB: Implement linkat.
-pub fn sys_linkat(_old_name: *const u8, _new_name: *const u8) -> isize {
-    trace!(
-        "kernel:pid[{}] sys_linkat NOT IMPLEMENTED",
-        current_task().unwrap().pid.0
-    );
-    -1
+/// 为同一文件创建新的目录项，实现硬链接
+pub fn sys_linkat(old_name: *const u8, new_name: *const u8) -> isize {
+    trace!("kernel:pid[{}] sys_linkat", current_task().unwrap().pid.0);
+    let token = current_user_token();
+    // 读取用户态传入的旧路径与新路径
+    let old = translated_str(token, old_name);
+    let new = translated_str(token, new_name);
+    if old.is_empty() || new.is_empty() || old == new {
+        return -1;
+    }
+    // 尝试在文件系统中建立硬链接
+    if link_file(old.as_str(), new.as_str()) {
+        0
+    } else {
+        -1
+    }
 }
 
-/// YOUR JOB: Implement unlinkat.
-pub fn sys_unlinkat(_name: *const u8) -> isize {
-    trace!(
-        "kernel:pid[{}] sys_unlinkat NOT IMPLEMENTED",
-        current_task().unwrap().pid.0
-    );
-    -1
+/// 从文件系统中删除目录项，并在必要时彻底回收文件
+pub fn sys_unlinkat(name: *const u8) -> isize {
+    trace!("kernel:pid[{}] sys_unlinkat", current_task().unwrap().pid.0);
+    let token = current_user_token();
+    // 获取用户态传入的目标路径
+    let path = translated_str(token, name);
+    if path.is_empty() {
+        return -1;
+    }
+    // 从文件系统中移除目录项
+    if unlink_file(path.as_str()) {
+        0
+    } else {
+        -1
+    }
 }

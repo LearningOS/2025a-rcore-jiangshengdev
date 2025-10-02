@@ -4,7 +4,7 @@
 //!
 //! `UPSafeCell<OSInodeInner>` -> `OSInode`: for static `ROOT_INODE`,we
 //! need to wrap `OSInodeInner` into `UPSafeCell`
-use super::File;
+use super::{File, StatInfo, StatMode};
 use crate::drivers::BLOCK_DEVICE;
 use crate::mm::UserBuffer;
 use crate::sync::UPSafeCell;
@@ -53,6 +53,23 @@ impl OSInode {
             v.extend_from_slice(&buffer[..len]);
         }
         v
+    }
+
+    /// 为 stat 系统调用提取当前 inode 的元数据
+    pub fn metadata(&self) -> StatInfo {
+        // 独占访问内部状态以读取文件信息
+        let inner = self.inner.exclusive_access();
+        // 判断 inode 类型映射到 StatMode
+        let mode = if inner.inode.is_dir() {
+            StatMode::DIR
+        } else {
+            StatMode::FILE
+        };
+        StatInfo {
+            ino: inner.inode.inode_id() as u64,
+            mode,
+            nlink: inner.inode.nlink(),
+        }
     }
 }
 
@@ -126,6 +143,51 @@ pub fn open_file(name: &str, flags: OpenFlags) -> Option<Arc<OSInode>> {
     }
 }
 
+/// 为 old_name 对应文件创建名为 new_name 的硬链接
+pub fn link_file(old_name: &str, new_name: &str) -> bool {
+    // 相同名字不能创建硬链接
+    if old_name == new_name {
+        return false;
+    }
+    // 新名字已经存在时直接失败
+    if ROOT_INODE.find(new_name).is_some() {
+        return false;
+    }
+    // 查找旧文件存在时在根目录下追加链接
+    if let Some(target) = ROOT_INODE.find(old_name) {
+        ROOT_INODE.hard_link(new_name, &target)
+    } else {
+        false
+    }
+}
+
+/// 删除指定文件的目录项，并在链接数归零时回收 inode
+pub fn unlink_file(name: &str) -> bool {
+    // 查找待删除的文件
+    if let Some(target) = ROOT_INODE.find(name) {
+        // 禁止对目录执行 unlink
+        if target.is_dir() {
+            return false;
+        }
+        // 从根目录移除目录项并同步硬链接计数
+        if let Some(inode_id) = ROOT_INODE.remove_dirent(name) {
+            debug_assert_eq!(inode_id, target.inode_id());
+            // 减少硬链接数并判断是否需要回收 inode
+            let remaining = target.decrease_nlink();
+            if remaining == 0 {
+                // 清空文件数据并释放 inode
+                target.clear();
+                target.dealloc();
+            }
+            true
+        } else {
+            false
+        }
+    } else {
+        false
+    }
+}
+
 impl File for OSInode {
     fn readable(&self) -> bool {
         self.readable
@@ -156,5 +218,8 @@ impl File for OSInode {
             total_write_size += write_size;
         }
         total_write_size
+    }
+    fn stat(&self) -> Option<StatInfo> {
+        Some(self.metadata())
     }
 }

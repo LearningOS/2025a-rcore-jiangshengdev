@@ -68,7 +68,7 @@ impl SuperBlock {
     }
 }
 /// Type of a disk inode
-#[derive(PartialEq)]
+#[derive(PartialEq, Clone, Copy)]
 pub enum DiskInodeType {
     File,
     Directory,
@@ -86,6 +86,7 @@ pub struct DiskInode {
     pub indirect1: u32,
     pub indirect2: u32,
     type_: DiskInodeType,
+    nlink: u32,
 }
 
 impl DiskInode {
@@ -97,6 +98,7 @@ impl DiskInode {
         self.indirect1 = 0;
         self.indirect2 = 0;
         self.type_ = type_;
+        self.nlink = 1;
     }
     /// Whether this inode is a directory
     pub fn is_dir(&self) -> bool {
@@ -106,6 +108,38 @@ impl DiskInode {
     #[allow(unused)]
     pub fn is_file(&self) -> bool {
         self.type_ == DiskInodeType::File
+    }
+
+    /// 返回当前硬链接的数量
+    pub fn nlink(&self) -> u32 {
+        // 直接返回记录的硬链接引用计数
+        self.nlink
+    }
+
+    /// 将硬链接计数加一
+    pub fn increase_nlink(&mut self) {
+        // 增加硬链接计数以记录新增目录项
+        self.nlink += 1;
+    }
+
+    /// 将硬链接计数减一并返回剩余数量
+    pub fn decrease_nlink(&mut self) -> u32 {
+        // 确保当前计数大于零
+        assert!(self.nlink > 0);
+        // 减少一次引用并返回剩余数量
+        self.nlink -= 1;
+        self.nlink
+    }
+
+    /// 将硬链接计数直接设为指定值
+    pub fn set_nlink(&mut self, nlink: u32) {
+        // 覆盖记录的硬链接计数
+        self.nlink = nlink;
+    }
+
+    /// 显式调整磁盘 inode 的类型
+    pub fn set_type(&mut self, type_: DiskInodeType) {
+        self.type_ = type_;
     }
     /// Return block number correspond to size.
     pub fn data_blocks(&self) -> u32 {
@@ -159,6 +193,109 @@ impl DiskInode {
                 .read(0, |indirect1: &IndirectBlock| {
                     indirect1[last % INODE_INDIRECT1_COUNT]
                 })
+        }
+    }
+
+    /// 将 inode 截断为更小尺寸并收集需要释放的数据块与元数据块。
+    /// 返回需要交还给分配器的块号列表。
+    pub fn truncate(&mut self, new_size: u32, block_device: &Arc<dyn BlockDevice>) -> Vec<u32> {
+        // 目标尺寸未变化时直接返回空列表
+        if new_size == self.size {
+            return Vec::new();
+        }
+        // 保证新尺寸不会增加
+        assert!(new_size <= self.size);
+        // 记录需要归还的块号
+        let mut freed: Vec<u32> = Vec::new();
+        // 计算当前与目标数据块数量
+        let mut old_data_blocks = Self::_data_blocks(self.size);
+        let new_data_blocks = Self::_data_blocks(new_size);
+        // 逐个释放多余的数据块
+        while old_data_blocks > new_data_blocks {
+            let index = (old_data_blocks - 1) as usize;
+            self.release_data_block(index, block_device, &mut freed);
+            old_data_blocks -= 1;
+        }
+        // 更新文件大小
+        self.size = new_size;
+        freed
+    }
+
+    /// 回收指定索引的数据块及相关间接块，并把块号加入 freed 列表
+    fn release_data_block(
+        &mut self,
+        index: usize,
+        block_device: &Arc<dyn BlockDevice>,
+        freed: &mut Vec<u32>,
+    ) {
+        if index < INODE_DIRECT_COUNT {
+            // 直接块清零并记录释放
+            let block = self.direct[index];
+            self.direct[index] = 0;
+            if block != 0 {
+                freed.push(block);
+            }
+        } else if index < INDIRECT1_BOUND {
+            // 定位一级间接块中的槽位
+            let slot = index - INODE_DIRECT_COUNT;
+            let indirect1_block = self.indirect1;
+            debug_assert_ne!(indirect1_block, 0);
+            // 读取并清空目标数据块指针
+            let block = get_block_cache(indirect1_block as usize, Arc::clone(block_device))
+                .lock()
+                .modify(0, |indirect1: &mut IndirectBlock| {
+                    let block = indirect1[slot];
+                    indirect1[slot] = 0;
+                    block
+                });
+            if block != 0 {
+                freed.push(block);
+            }
+            if slot == 0 {
+                // 回收空闲的一级间接块
+                if indirect1_block != 0 {
+                    freed.push(indirect1_block);
+                }
+                self.indirect1 = 0;
+            }
+        } else {
+            // 解析二级间接块层级位置
+            let last = index - INDIRECT1_BOUND;
+            let indirect2_idx = last / INODE_INDIRECT1_COUNT;
+            let indirect1_idx = last % INODE_INDIRECT1_COUNT;
+            let indirect2_block = self.indirect2;
+            debug_assert_ne!(indirect2_block, 0);
+            // 定位对应的一级间接块
+            let child_block_id =
+                get_block_cache(indirect2_block as usize, Arc::clone(block_device))
+                    .lock()
+                    .read(0, |indirect2: &IndirectBlock| indirect2[indirect2_idx]);
+            debug_assert_ne!(child_block_id, 0);
+            // 清空一级间接块中的数据块指针
+            let data_block = get_block_cache(child_block_id as usize, Arc::clone(block_device))
+                .lock()
+                .modify(0, |indirect1: &mut IndirectBlock| {
+                    let block = indirect1[indirect1_idx];
+                    indirect1[indirect1_idx] = 0;
+                    block
+                });
+            if data_block != 0 {
+                freed.push(data_block);
+            }
+            if indirect1_idx == 0 {
+                // 释放已经用尽的一级间接块
+                freed.push(child_block_id);
+                get_block_cache(indirect2_block as usize, Arc::clone(block_device))
+                    .lock()
+                    .modify(0, |indirect2: &mut IndirectBlock| {
+                        indirect2[indirect2_idx] = 0;
+                    });
+                if indirect2_idx == 0 {
+                    // 释放空闲的二级间接块
+                    freed.push(indirect2_block);
+                    self.indirect2 = 0;
+                }
+            }
         }
     }
     /// Inncrease the size of current disk inode
@@ -238,75 +375,12 @@ impl DiskInode {
     /// Clear size to zero and return blocks that should be deallocated.
     /// We will clear the block contents to zero later.
     pub fn clear_size(&mut self, block_device: &Arc<dyn BlockDevice>) -> Vec<u32> {
-        let mut v: Vec<u32> = Vec::new();
-        let mut data_blocks = self.data_blocks() as usize;
-        self.size = 0;
-        let mut current_blocks = 0usize;
-        // direct
-        while current_blocks < data_blocks.min(INODE_DIRECT_COUNT) {
-            v.push(self.direct[current_blocks]);
-            self.direct[current_blocks] = 0;
-            current_blocks += 1;
-        }
-        // indirect1 block
-        if data_blocks > INODE_DIRECT_COUNT {
-            v.push(self.indirect1);
-            data_blocks -= INODE_DIRECT_COUNT;
-            current_blocks = 0;
-        } else {
-            return v;
-        }
-        // indirect1
-        get_block_cache(self.indirect1 as usize, Arc::clone(block_device))
-            .lock()
-            .modify(0, |indirect1: &mut IndirectBlock| {
-                while current_blocks < data_blocks.min(INODE_INDIRECT1_COUNT) {
-                    v.push(indirect1[current_blocks]);
-                    //indirect1[current_blocks] = 0;
-                    current_blocks += 1;
-                }
-            });
-        self.indirect1 = 0;
-        // indirect2 block
-        if data_blocks > INODE_INDIRECT1_COUNT {
-            v.push(self.indirect2);
-            data_blocks -= INODE_INDIRECT1_COUNT;
-        } else {
-            return v;
-        }
-        // indirect2
-        assert!(data_blocks <= INODE_INDIRECT2_COUNT);
-        let a1 = data_blocks / INODE_INDIRECT1_COUNT;
-        let b1 = data_blocks % INODE_INDIRECT1_COUNT;
-        get_block_cache(self.indirect2 as usize, Arc::clone(block_device))
-            .lock()
-            .modify(0, |indirect2: &mut IndirectBlock| {
-                // full indirect1 blocks
-                for entry in indirect2.iter_mut().take(a1) {
-                    v.push(*entry);
-                    get_block_cache(*entry as usize, Arc::clone(block_device))
-                        .lock()
-                        .modify(0, |indirect1: &mut IndirectBlock| {
-                            for entry in indirect1.iter() {
-                                v.push(*entry);
-                            }
-                        });
-                }
-                // last indirect1 block
-                if b1 > 0 {
-                    v.push(indirect2[a1]);
-                    get_block_cache(indirect2[a1] as usize, Arc::clone(block_device))
-                        .lock()
-                        .modify(0, |indirect1: &mut IndirectBlock| {
-                            for entry in indirect1.iter().take(b1) {
-                                v.push(*entry);
-                            }
-                        });
-                    //indirect2[a1] = 0;
-                }
-            });
-        self.indirect2 = 0;
-        v
+        // 记录当前文件大小，用于断言校验
+        let old_size = self.size;
+        // 调用截断逻辑释放所有数据块
+        let freed = self.truncate(0, block_device);
+        debug_assert_eq!(freed.len(), Self::total_blocks(old_size) as usize);
+        freed
     }
     /// Read data from current disk inode
     pub fn read_at(
