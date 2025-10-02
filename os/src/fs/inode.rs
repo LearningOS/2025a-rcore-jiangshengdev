@@ -12,7 +12,7 @@ use alloc::sync::Arc;
 use alloc::vec;
 use alloc::vec::Vec;
 use bitflags::*;
-use easy_fs::{EasyFileSystem, Inode};
+use easy_fs::{EasyFileSystem, Inode, Stat};
 use lazy_static::*;
 
 /// inode in memory
@@ -53,6 +53,13 @@ impl OSInode {
             v.extend_from_slice(&buffer[..len]);
         }
         v
+    }
+
+    pub fn stat(&self) -> Option<Stat> {
+        let inner = self.inner.exclusive_access();
+        let inode = Arc::clone(&inner.inode);
+        drop(inner);
+        inode.stat()
     }
 }
 
@@ -126,6 +133,16 @@ pub fn open_file(name: &str, flags: OpenFlags) -> Option<Arc<OSInode>> {
     }
 }
 
+/// Link a file
+pub fn link_file(old_name: &str, new_name: &str) -> Option<()> {
+    ROOT_INODE.link(old_name, new_name)
+}
+
+/// Unlink a file
+pub fn unlink_file(name: &str) -> Option<()> {
+    ROOT_INODE.unlink(name)
+}
+
 impl File for OSInode {
     fn readable(&self) -> bool {
         self.readable
@@ -156,5 +173,8 @@ impl File for OSInode {
             total_write_size += write_size;
         }
         total_write_size
+    }
+    fn stat(&self) -> Option<Stat> {
+        OSInode::stat(self)
     }
 }
