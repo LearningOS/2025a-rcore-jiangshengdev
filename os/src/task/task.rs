@@ -71,6 +71,12 @@ pub struct TaskControlBlockInner {
 
     /// Program break
     pub program_brk: usize,
+
+    /// 该进程当前已经运行的“长度”
+    pub stride: u8,
+
+    /// 表示进程的优先权（大于 1）
+    pub priority: u8,
 }
 
 impl TaskControlBlockInner {
@@ -135,6 +141,8 @@ impl TaskControlBlock {
                     ],
                     heap_bottom: user_sp,
                     program_brk: user_sp,
+                    stride: 0,
+                    priority: 16,
                 })
             },
         };
@@ -161,10 +169,18 @@ impl TaskControlBlock {
 
         // **** access current TCB exclusively
         let mut inner = self.inner_exclusive_access();
+        // 清理原有的 mmap 匿名映射区域
+        // 统一调用 clear_mmap 方法，安全清理匿名映射
+        inner.memory_set.clear_mmap();
         // substitute memory_set
         inner.memory_set = memory_set;
         // update trap_cx ppn
         inner.trap_cx_ppn = trap_cx_ppn;
+        // initialize base_size
+        inner.base_size = user_sp;
+        // initialize heap bottom and program break
+        inner.heap_bottom = user_sp;
+        inner.program_brk = user_sp;
         // initialize trap_cx
         let trap_cx = TrapContext::app_init_context(
             entry_point,
@@ -216,6 +232,8 @@ impl TaskControlBlock {
                     fd_table: new_fd_table,
                     heap_bottom: parent_inner.heap_bottom,
                     program_brk: parent_inner.program_brk,
+                    stride: parent_inner.stride,
+                    priority: parent_inner.priority,
                 })
             },
         });
@@ -229,6 +247,17 @@ impl TaskControlBlock {
         task_control_block
         // **** release child PCB
         // ---- release parent PCB
+    }
+
+    /// spawn a process
+    pub fn spawn(self: &Arc<Self>, elf_data: &[u8]) -> Arc<Self> {
+        let mut parent_inner = self.inner_exclusive_access();
+        let task_control_block = Arc::new(Self::new(elf_data));
+        parent_inner.children.push(task_control_block.clone());
+        let mut child_inner = task_control_block.inner_exclusive_access();
+        child_inner.parent = Some(Arc::downgrade(self));
+        drop(child_inner);
+        task_control_block
     }
 
     /// get pid of process

@@ -10,18 +10,24 @@ mod address;
 mod frame_allocator;
 mod heap_allocator;
 mod memory_set;
+mod mmap_area;
 mod page_table;
+mod prot;
+mod user;
 
 use address::VPNRange;
 pub use address::{PhysAddr, PhysPageNum, StepByOne, VirtAddr, VirtPageNum};
 pub use frame_allocator::{frame_alloc, frame_dealloc, FrameTracker};
 pub use memory_set::remap_test;
 pub use memory_set::{kernel_token, MapPermission, MemorySet, KERNEL_SPACE};
+pub use mmap_area::MmapAreaManager;
 use page_table::PTEFlags;
 pub use page_table::{
-    translated_byte_buffer, translated_ref, translated_refmut, translated_str, PageTable,
-    PageTableEntry, UserBuffer, UserBufferIterator,
+    translated_byte_buffer, translated_refmut, translated_str, PageTable, PageTableEntry,
+    UserBuffer,
 };
+pub use prot::parse_prot;
+pub use user::write_user_struct;
 
 /// initiate heap allocator, frame allocator and kernel space
 pub fn init() {

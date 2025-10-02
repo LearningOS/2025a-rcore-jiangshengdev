@@ -62,6 +62,10 @@ impl PageTableEntry {
     pub fn executable(&self) -> bool {
         (self.flags() & PTEFlags::X) != PTEFlags::empty()
     }
+    /// The page pointered by page table entry is accessible by user mode?
+    pub fn is_user_accessible(&self) -> bool {
+        (self.flags() & PTEFlags::U) != PTEFlags::empty()
+    }
 }
 
 /// page table structure
@@ -158,6 +162,12 @@ impl PageTable {
     }
 }
 
+impl Default for PageTable {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// Translate&Copy a ptr[u8] array with LENGTH len to a mutable u8 Vec through page table
 pub fn translated_byte_buffer(token: usize, ptr: *const u8, len: usize) -> Vec<&'static mut [u8]> {
     let page_table = PageTable::from_token(token);
@@ -237,6 +247,10 @@ impl UserBuffer {
             total += b.len();
         }
         total
+    }
+    /// Check whether the buffer has no data
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
     }
 }
 

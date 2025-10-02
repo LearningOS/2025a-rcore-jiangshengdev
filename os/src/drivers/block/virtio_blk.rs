@@ -33,6 +33,12 @@ impl BlockDevice for VirtIOBlock {
     }
 }
 
+impl Default for VirtIOBlock {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl VirtIOBlock {
     #[allow(unused)]
     /// Create a new VirtIOBlock driver with VIRTIO0 base_addr for virtio_blk device
