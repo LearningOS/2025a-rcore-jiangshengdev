@@ -19,8 +19,8 @@ pub use memory_set::remap_test;
 pub use memory_set::{kernel_token, MapPermission, MemorySet, KERNEL_SPACE};
 use page_table::PTEFlags;
 pub use page_table::{
-    translated_byte_buffer, translated_ref, translated_refmut, translated_str, PageTable,
-    PageTableEntry, UserBuffer, UserBufferIterator,
+    translated_byte_buffer, translated_refmut, translated_str, PageTable,
+    PageTableEntry, UserBuffer,
 };
 
 /// 初始化堆分配器、帧分配器和内核空间
