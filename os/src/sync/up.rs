@@ -16,6 +16,7 @@ pub struct UPSafeCell<T> {
 unsafe impl<T> Sync for UPSafeCell<T> {}
 
 impl<T> UPSafeCell<T> {
+    /// # Safety
     /// 用户有责任保证内部结构只在
     /// 单处理器中使用。
     pub unsafe fn new(value: T) -> Self {

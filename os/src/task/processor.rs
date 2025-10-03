@@ -21,6 +21,12 @@ pub struct Processor {
     idle_task_cx: TaskContext,
 }
 
+impl Default for Processor {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Processor {
     /// 创建一个空的处理器
     pub fn new() -> Self {
@@ -100,8 +106,9 @@ pub fn current_trap_cx() -> &'static mut TrapContext {
         .get_trap_cx()
 }
 
+/// # Safety
 /// 返回空闲控制流进行新的调度
-pub fn schedule(switched_task_cx_ptr: *mut TaskContext) {
+pub unsafe fn schedule(switched_task_cx_ptr: *mut TaskContext) {
     let mut processor = PROCESSOR.exclusive_access();
     let idle_task_cx_ptr = processor.get_idle_task_cx_ptr();
     drop(processor);

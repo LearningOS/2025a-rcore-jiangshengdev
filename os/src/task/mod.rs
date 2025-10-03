@@ -48,7 +48,9 @@ pub fn suspend_current_and_run_next() {
     // 推回就绪队列
     add_task(task);
     // 跳转到调度循环
-    schedule(task_cx_ptr);
+    unsafe {
+        schedule(task_cx_ptr);
+    }
 }
 
 /// make run TEST=1 中 usertests 应用程序的 PID
@@ -97,7 +99,9 @@ pub fn exit_current_and_run_next(exit_code: i32) {
     drop(task);
     // 我们不需要保存任务上下文
     let mut _unused = TaskContext::zero_init();
-    schedule(&mut _unused as *mut _);
+    unsafe {
+        schedule(&mut _unused as *mut _);
+    }
 }
 
 lazy_static! {

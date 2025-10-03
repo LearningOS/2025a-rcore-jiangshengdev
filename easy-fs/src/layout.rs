@@ -166,7 +166,7 @@ impl DiskInode {
     pub fn total_blocks(size: u32) -> u32 {
         // 计算需要的数据块数
         let data_blocks = Self::_data_blocks(size) as usize;
-        let mut total = data_blocks as usize;
+        let mut total = data_blocks;
         // 如果数据块数超过直接索引范围，需要一级间接块
         if data_blocks > INODE_DIRECT_COUNT {
             total += 1;

@@ -55,38 +55,35 @@ impl Bitmap {
         // 遍历位图的每个块，寻找可用的位
         for block_id in 0..self.blocks {
             // 获取当前位图块的缓存
-            let pos = get_block_cache(
-                block_id + self.start_block_id as usize,
-                Arc::clone(block_device),
-            )
-            .lock()
-            .modify(0, |bitmap_block: &mut BitmapBlock| {
-                // 在位图块中查找第一个未满的64位段
-                // u64::MAX表示所有位都被占用
-                if let Some((bits64_pos, inner_pos)) = bitmap_block
-                    .iter()
-                    .enumerate()
-                    .find(|(_, bits64)| {
-                        compiler_fence(Ordering::SeqCst);
-                        **bits64 != u64::MAX
-                    })
-                    // 使用trailing_ones()找到第一个0位的位置
-                    // trailing_ones()返回从最低位开始连续1的个数
-                    .map(|(bits64_pos, bits64)| {
-                        compiler_fence(Ordering::SeqCst);
-                        (bits64_pos, bits64.trailing_ones() as usize)
-                    })
-                {
-                    // 将找到的位设置为1，表示已分配
-                    bitmap_block[bits64_pos] |= 1u64 << inner_pos;
-                    // 计算全局位索引：块偏移 + 64位段偏移 + 段内偏移
-                    let global_bit_index = block_id * BLOCK_BITS + bits64_pos * 64 + inner_pos;
-                    Some(global_bit_index)
-                } else {
-                    // 当前块已满，返回None继续查找下一个块
-                    None
-                }
-            });
+            let pos = get_block_cache(block_id + self.start_block_id, Arc::clone(block_device))
+                .lock()
+                .modify(0, |bitmap_block: &mut BitmapBlock| {
+                    // 在位图块中查找第一个未满的64位段
+                    // u64::MAX表示所有位都被占用
+                    if let Some((bits64_pos, inner_pos)) = bitmap_block
+                        .iter()
+                        .enumerate()
+                        .find(|(_, bits64)| {
+                            compiler_fence(Ordering::SeqCst);
+                            **bits64 != u64::MAX
+                        })
+                        // 使用trailing_ones()找到第一个0位的位置
+                        // trailing_ones()返回从最低位开始连续1的个数
+                        .map(|(bits64_pos, bits64)| {
+                            compiler_fence(Ordering::SeqCst);
+                            (bits64_pos, bits64.trailing_ones() as usize)
+                        })
+                    {
+                        // 将找到的位设置为1，表示已分配
+                        bitmap_block[bits64_pos] |= 1u64 << inner_pos;
+                        // 计算全局位索引：块偏移 + 64位段偏移 + 段内偏移
+                        let global_bit_index = block_id * BLOCK_BITS + bits64_pos * 64 + inner_pos;
+                        Some(global_bit_index)
+                    } else {
+                        // 当前块已满，返回None继续查找下一个块
+                        None
+                    }
+                });
             // 如果在当前块中找到了可用位，直接返回
             if pos.is_some() {
                 return pos;

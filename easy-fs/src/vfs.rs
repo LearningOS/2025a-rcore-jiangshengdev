@@ -94,7 +94,7 @@ impl Inode {
             // 比较目录项名称与目标名称
             if dirent.name() == name {
                 // 找到匹配的文件，返回其inode编号
-                return Some(dirent.inode_id() as u32);
+                return Some(dirent.inode_id());
             }
         }
         // 遍历完所有目录项都没找到，返回None
@@ -295,7 +295,10 @@ impl Inode {
             // 清空inode并获取需要释放的所有块
             let data_blocks_dealloc = disk_inode.clear_size(&self.block_device);
             // 验证释放的块数是否正确
-            assert!(data_blocks_dealloc.len() == DiskInode::total_blocks(size) as usize);
+            assert_eq!(
+                data_blocks_dealloc.len(),
+                DiskInode::total_blocks(size) as usize
+            );
             // 逐个释放所有数据块
             for data_block in data_blocks_dealloc.into_iter() {
                 fs.dealloc_data(data_block);

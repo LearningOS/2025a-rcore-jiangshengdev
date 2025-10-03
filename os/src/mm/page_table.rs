@@ -71,6 +71,12 @@ pub struct PageTable {
 }
 
 /// 假设在创建/映射时不会发生内存不足。
+impl Default for PageTable {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl PageTable {
     /// 创建一个新的页表
     pub fn new() -> Self {
@@ -237,6 +243,10 @@ impl UserBuffer {
             total += b.len();
         }
         total
+    }
+    /// Check whether the buffer has no data
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
     }
 }
 

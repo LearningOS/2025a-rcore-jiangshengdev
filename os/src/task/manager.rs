@@ -10,6 +10,12 @@ pub struct TaskManager {
 }
 
 /// 一个简单的 FIFO 调度器
+impl Default for TaskManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TaskManager {
     /// 创建一个空的 TaskManager
     pub fn new() -> Self {
