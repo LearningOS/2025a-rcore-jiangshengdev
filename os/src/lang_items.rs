@@ -1,4 +1,4 @@
-//! The panic handler
+//! panic 处理程序
 
 use crate::sbi::shutdown;
 use core::panic::PanicInfo;

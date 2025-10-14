@@ -8,9 +8,10 @@ use alloc::vec::Vec;
 use lazy_static::*;
 use virtio_drivers::{Hal, VirtIOBlk, VirtIOHeader};
 
+/// Virtio_Block 设备中控制寄存器的基地址
 #[allow(unused)]
 const VIRTIO0: usize = 0x10001000;
-/// VirtIOBlock device driver strcuture for virtio_blk device
+/// virtio_blk 设备的 VirtIOBlock 设备驱动结构
 pub struct VirtIOBlock(UPSafeCell<VirtIOBlk<'static, VirtioHal>>);
 
 lazy_static! {
@@ -34,7 +35,7 @@ impl BlockDevice for VirtIOBlock {
 
 impl VirtIOBlock {
     #[allow(unused)]
-    /// Create a new VirtIOBlock driver with VIRTIO0 base_addr for virtio_blk device
+    /// 使用 VIRTIO0 基地址为 virtio_blk 设备创建新的 VirtIOBlock 驱动
     pub fn new() -> Self {
         unsafe {
             Self(UPSafeCell::new(

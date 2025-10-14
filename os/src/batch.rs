@@ -1,4 +1,4 @@
-//! batch subsystem
+//! 批处理子系统
 
 use crate::sync::UPSafeCell;
 use crate::trap::TrapContext;
@@ -73,7 +73,7 @@ impl AppManager {
             crate::board::QEMU_EXIT_HANDLE.exit_success();
         }
         println!("[kernel] Loading app_{}", app_id);
-        // clear app area
+        // 清空应用程序区域
         core::slice::from_raw_parts_mut(APP_BASE_ADDRESS as *mut u8, APP_SIZE_LIMIT).fill(0);
         let app_src = core::slice::from_raw_parts(
             self.app_start[app_id] as *const u8,
@@ -81,12 +81,11 @@ impl AppManager {
         );
         let app_dst = core::slice::from_raw_parts_mut(APP_BASE_ADDRESS as *mut u8, app_src.len());
         app_dst.copy_from_slice(app_src);
-        // Memory fence about fetching the instruction memory
-        // It is guaranteed that a subsequent instruction fetch must
-        // observes all previous writes to the instruction memory.
-        // Therefore, fence.i must be executed after we have loaded
-        // the code of the next app into the instruction memory.
-        // See also: riscv non-priv spec chapter 3, 'Zifencei' extension.
+        // 关于获取指令内存的内存屏障
+        // 保证后续的指令获取必须观察到所有之前对指令内存的写入。
+        // 因此，在我们将下一个应用程序的代码加载到指令内存后，
+        // 必须执行 fence.i。
+        // 另见：riscv non-priv spec 第3章，'Zifencei' 扩展。
         asm!("fence.i");
     }
 
@@ -120,17 +119,17 @@ lazy_static! {
     };
 }
 
-/// init batch subsystem
+/// 初始化批处理子系统
 pub fn init() {
     print_app_info();
 }
 
-/// print apps info
+/// 打印应用程序信息
 pub fn print_app_info() {
     APP_MANAGER.exclusive_access().print_app_info();
 }
 
-/// run next app
+/// 运行下一个应用程序
 pub fn run_next_app() -> ! {
     let mut app_manager = APP_MANAGER.exclusive_access();
     let current_app = app_manager.get_current_app();
@@ -139,8 +138,8 @@ pub fn run_next_app() -> ! {
     }
     app_manager.move_to_next_app();
     drop(app_manager);
-    // before this we have to drop local variables related to resources manually
-    // and release the resources
+    // 在此之前我们必须手动丢弃与资源相关的局部变量
+    // 并释放资源
     extern "C" {
         fn __restore(cx_addr: usize);
     }

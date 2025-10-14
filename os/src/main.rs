@@ -1,22 +1,18 @@
-//! The main module and entrypoint
+//! 主模块和入口点
 //!
-//! Various facilities of the kernels are implemented as submodules. The most
-//! important ones are:
+//! 内核的各种功能都作为子模块实现。最重要的包括：
 //!
-//! - [`trap`]: Handles all cases of switching from userspace to the kernel
-//! - [`task`]: Task management
-//! - [`syscall`]: System call handling and implementation
-//! - [`mm`]: Address map using SV39
-//! - [`sync`]: Wrap a static data structure inside it so that we are able to access it without any `unsafe`.
-//! - [`fs`]: Separate user from file system with some structures
+//! - [`trap`]: 处理从用户空间切换到内核的所有情况
+//! - [`task`]: 任务管理
+//! - [`syscall`]: 系统调用处理和实现
+//! - [`mm`]: 使用 SV39 的地址映射
+//! - [`sync`]: 将静态数据结构包装在其中，以便我们能够在没有任何 `unsafe` 的情况下访问它。
+//! - [`fs`]: 通过一些结构将用户与文件系统分离
 //!
-//! The operating system also starts in this module. Kernel code starts
-//! executing from `entry.asm`, after which [`rust_main()`] is called to
-//! initialize various pieces of functionality. (See its source code for
-//! details.)
+//! 操作系统也从这个模块开始。内核代码从 `entry.asm` 开始执行，
+//! 之后调用 [`rust_main()`] 来初始化各种功能。（详见其源代码。）
 //!
-//! We then call [`task::run_tasks()`] and for the first time go to
-//! userspace.
+//! 然后我们调用 [`task::run_tasks()`] 并第一次进入用户空间。
 
 #![deny(missing_docs)]
 #![deny(warnings)]
@@ -25,12 +21,11 @@
 #![feature(panic_info_message)]
 #![feature(alloc_error_handler)]
 
+extern crate alloc;
 #[macro_use]
 extern crate bitflags;
 #[macro_use]
 extern crate log;
-
-extern crate alloc;
 
 #[macro_use]
 mod console;
@@ -50,7 +45,7 @@ pub mod trap;
 use core::arch::global_asm;
 
 global_asm!(include_str!("entry.asm"));
-/// clear BSS segment
+/// 清空 BSS 段
 fn clear_bss() {
     extern "C" {
         fn sbss();
@@ -63,7 +58,7 @@ fn clear_bss() {
 }
 
 #[no_mangle]
-/// the rust entry-point of os
+/// 操作系统的 Rust 入口点
 pub fn rust_main() -> ! {
     clear_bss();
     println!("[kernel] Hello, world!");

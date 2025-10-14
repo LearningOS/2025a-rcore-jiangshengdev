@@ -1,4 +1,4 @@
-//! File trait & inode(dir, file, pipe, stdin, stdout)
+//! File trait 和 inode（目录、文件、管道、标准输入、标准输出）
 
 mod inode;
 mod pipe;
@@ -6,43 +6,43 @@ mod stdio;
 
 use crate::mm::UserBuffer;
 
-/// trait File for all file types
+/// 所有文件类型的 File trait
 pub trait File: Send + Sync {
-    /// the file readable?
+    /// 文件是否可读？
     fn readable(&self) -> bool;
-    /// the file writable?
+    /// 文件是否可写？
     fn writable(&self) -> bool;
-    /// read from the file to buf, return the number of bytes read
+    /// 从文件读取到缓冲区，返回读取的字节数
     fn read(&self, buf: UserBuffer) -> usize;
-    /// write to the file from buf, return the number of bytes written
+    /// 从缓冲区写入到文件，返回写入的字节数
     fn write(&self, buf: UserBuffer) -> usize;
 }
 
-/// The stat of a inode
+/// inode 的状态信息
 #[repr(C)]
 #[derive(Debug)]
 pub struct Stat {
-    /// ID of device containing file
+    /// 包含文件的设备 ID
     pub dev: u64,
-    /// inode number
+    /// inode 编号
     pub ino: u64,
-    /// file type and mode
+    /// 文件类型和模式
     pub mode: StatMode,
-    /// number of hard links
+    /// 硬链接数量
     pub nlink: u32,
-    /// unused pad
+    /// 未使用的填充
     pad: [u64; 7],
 }
 
 bitflags! {
-    /// The mode of a inode
-    /// whether a directory or a file
+    /// inode 的模式
+    /// 是目录还是文件
     pub struct StatMode: u32 {
-        /// null
+        /// 空
         const NULL  = 0;
-        /// directory
+        /// 目录
         const DIR   = 0o040000;
-        /// ordinary regular file
+        /// 普通常规文件
         const FILE  = 0o100000;
     }
 }

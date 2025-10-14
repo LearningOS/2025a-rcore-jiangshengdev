@@ -1,4 +1,4 @@
-//! block device driver
+//! 块设备驱动
 
 pub mod block;
 

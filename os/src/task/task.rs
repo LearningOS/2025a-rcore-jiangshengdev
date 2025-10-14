@@ -1,4 +1,4 @@
-//! Types related to task management & Functions for completely changing TCB
+//! 与任务管理相关的类型和完全更改 TCB 的函数
 
 use super::{
     kstack_alloc, pid_alloc, KernelStack, PidHandle, SignalActions, SignalFlags, TaskContext,
@@ -18,27 +18,27 @@ use alloc::{
 };
 use core::cell::RefMut;
 
-/// Task control block structure
+/// 任务控制块结构
 ///
-/// Directly save the contents that will not change during running
+/// 直接保存运行期间不会改变的内容
 pub struct TaskControlBlock {
-    // Immutable
-    /// Process identifier
+    // 不可变
+    /// 进程标识符
     pub pid: PidHandle,
 
-    /// Kernel stack corresponding to PID
+    /// 对应 PID 的内核栈
     pub kernel_stack: KernelStack,
 
-    /// Mutable
+    /// 可变
     inner: UPSafeCell<TaskControlBlockInner>,
 }
 
 impl TaskControlBlock {
-    /// Get the mutable reference of the inner TCB
+    /// 获取内部 TCB 的可变引用
     pub fn inner_exclusive_access(&self) -> RefMut<'_, TaskControlBlockInner> {
         self.inner.exclusive_access()
     }
-    /// Get the address of app's page table
+    /// 获取应用程序页表的地址
     pub fn get_user_token(&self) -> usize {
         let inner = self.inner_exclusive_access();
         inner.memory_set.token()
@@ -46,30 +46,30 @@ impl TaskControlBlock {
 }
 
 pub struct TaskControlBlockInner {
-    /// The physical page number of the frame where the trap context is placed
+    /// 放置陷阱上下文的帧的物理页号
     pub trap_cx_ppn: PhysPageNum,
 
-    /// Application data can only appear in areas
-    /// where the application address space is lower than base_size
+    /// 应用程序数据只能出现在应用程序地址空间
+    /// 低于 base_size 的区域中
     pub base_size: usize,
 
-    /// Save task context
+    /// 保存任务上下文
     pub task_cx: TaskContext,
 
-    /// Maintain the execution status of the current process
+    /// 维护当前进程的执行状态
     pub task_status: TaskStatus,
 
-    /// Application address space
+    /// 应用程序地址空间
     pub memory_set: MemorySet,
 
-    /// Parent process of the current process.
-    /// Weak will not affect the reference count of the parent
+    /// 当前进程的父进程。
+    /// Weak 不会影响父进程的引用计数
     pub parent: Option<Weak<TaskControlBlock>>,
 
-    /// A vector containing TCBs of all child processes of the current process
+    /// 包含当前进程所有子进程 TCB 的向量
     pub children: Vec<Arc<TaskControlBlock>>,
 
-    /// It is set when active exit or execution error occurs
+    /// 当主动退出或执行错误发生时设置
     pub exit_code: i32,
     pub fd_table: Vec<Option<Arc<dyn File + Send + Sync>>>,
     pub signals: SignalFlags,
@@ -84,10 +84,10 @@ pub struct TaskControlBlockInner {
     pub frozen: bool,
     pub trap_ctx_backup: Option<TrapContext>,
 
-    /// Heap bottom
+    /// 堆底部
     pub heap_bottom: usize,
 
-    /// Program break
+    /// 程序中断点
     pub program_brk: usize,
 }
 
@@ -115,21 +115,21 @@ impl TaskControlBlockInner {
 }
 
 impl TaskControlBlock {
-    /// Create a new process
+    /// 创建一个新进程
     ///
-    /// At present, it is only used for the creation of initproc
+    /// 目前仅用于创建 initproc
     pub fn new(elf_data: &[u8]) -> Self {
-        // memory_set with elf program headers/trampoline/trap context/user stack
+        // 包含 elf 程序头/跳板/陷阱上下文/用户栈的内存集
         let (memory_set, user_sp, entry_point) = MemorySet::from_elf(elf_data);
         let trap_cx_ppn = memory_set
             .translate(VirtAddr::from(TRAP_CONTEXT_BASE).into())
             .unwrap()
             .ppn();
-        // alloc a pid and a kernel stack in kernel space
+        // 在内核空间中分配一个 PID 和一个内核栈
         let pid_handle = pid_alloc();
         let kernel_stack = kstack_alloc();
         let kernel_stack_top = kernel_stack.get_top();
-        // push a task context which goes to trap_return to the top of kernel stack
+        // 将一个跳转到 trap_return 的任务上下文推入内核栈顶部
         let task_control_block = Self {
             pid: pid_handle,
             kernel_stack,
@@ -144,11 +144,11 @@ impl TaskControlBlock {
                     children: Vec::new(),
                     exit_code: 0,
                     fd_table: vec![
-                        // 0 -> stdin
+                        // 0 -> 标准输入
                         Some(Arc::new(Stdin)),
-                        // 1 -> stdout
+                        // 1 -> 标准输出
                         Some(Arc::new(Stdout)),
-                        // 2 -> stderr
+                        // 2 -> 标准错误
                         Some(Arc::new(Stdout)),
                     ],
                     signals: SignalFlags::empty(),
@@ -163,7 +163,7 @@ impl TaskControlBlock {
                 })
             },
         };
-        // prepare TrapContext in user space
+        // 在用户空间中准备陷阱上下文
         let trap_cx = task_control_block.inner_exclusive_access().get_trap_cx();
         *trap_cx = TrapContext::app_init_context(
             entry_point,
@@ -175,9 +175,9 @@ impl TaskControlBlock {
         task_control_block
     }
 
-    /// Load a new elf to replace the original application address space and start execution
+    /// 加载新的 elf 文件替换原始应用程序地址空间并开始执行
     pub fn exec(&self, elf_data: &[u8], args: Vec<String>) {
-        // memory_set with elf program headers/trampoline/trap context/user stack
+        // 包含 elf 程序头/跳板/陷阱上下文/用户栈的内存集
         let (memory_set, mut user_sp, entry_point) = MemorySet::from_elf(elf_data);
         let trap_cx_ppn = memory_set
             .translate(VirtAddr::from(TRAP_CONTEXT_BASE).into())
@@ -210,11 +210,11 @@ impl TaskControlBlock {
 
         // **** access current TCB exclusively
         let mut inner = self.inner_exclusive_access();
-        // substitute memory_set
+        // 替换内存集
         inner.memory_set = memory_set;
-        // update trap_cx ppn
+        // 更新陷阱上下文物理页号
         inner.trap_cx_ppn = trap_cx_ppn;
-        // initialize trap_cx
+        // 初始化陷阱上下文
         let mut trap_cx = TrapContext::app_init_context(
             entry_point,
             user_sp,
@@ -228,21 +228,21 @@ impl TaskControlBlock {
         // **** release current PCB
     }
 
-    /// Fork from parent to child
+    /// 父进程 fork 子进程
     pub fn fork(self: &Arc<TaskControlBlock>) -> Arc<TaskControlBlock> {
-        // ---- hold parent PCB lock
+        // ---- 持有父进程 PCB 锁
         let mut parent_inner = self.inner_exclusive_access();
-        // copy user space(include trap context)
+        // 复制用户空间（包括陷阱上下文）
         let memory_set = MemorySet::from_existed_user(&parent_inner.memory_set);
         let trap_cx_ppn = memory_set
             .translate(VirtAddr::from(TRAP_CONTEXT_BASE).into())
             .unwrap()
             .ppn();
-        // alloc a pid and a kernel stack in kernel space
+        // 在内核空间中分配一个 PID 和一个内核栈
         let pid_handle = pid_alloc();
         let kernel_stack = kstack_alloc();
         let kernel_stack_top = kernel_stack.get_top();
-        // copy fd table
+        // 复制文件描述符表
         let mut new_fd_table: Vec<Option<Arc<dyn File + Send + Sync>>> = Vec::new();
         for fd in parent_inner.fd_table.iter() {
             if let Some(file) = fd {
@@ -278,24 +278,24 @@ impl TaskControlBlock {
                 })
             },
         });
-        // add child
+        // 添加子进程
         parent_inner.children.push(task_control_block.clone());
-        // modify kernel_sp in trap_cx
-        // **** access child PCB exclusively
+        // 修改陷阱上下文中的内核栈指针
+        // **** 独占访问子进程 PCB
         let trap_cx = task_control_block.inner_exclusive_access().get_trap_cx();
         trap_cx.kernel_sp = kernel_stack_top;
-        // return
+        // 返回
         task_control_block
-        // **** release child PCB
+        // **** 释放子进程 PCB
         // ---- release parent PCB
     }
 
-    /// get pid of process
+    /// 获取进程的 PID
     pub fn getpid(&self) -> usize {
         self.pid.0
     }
 
-    /// change the location of the program break. return None if failed.
+    /// 更改程序中断点的位置。如果失败则返回 None
     pub fn change_program_brk(&self, size: i32) -> Option<usize> {
         let mut inner = self.inner_exclusive_access();
         let heap_bottom = inner.heap_bottom;
@@ -323,14 +323,14 @@ impl TaskControlBlock {
 }
 
 #[derive(Copy, Clone, PartialEq)]
-/// task status: UnInit, Ready, Running, Exited
+/// 任务状态：未初始化、就绪、运行中、已退出
 pub enum TaskStatus {
-    /// uninitialized
+    /// 未初始化
     UnInit,
-    /// ready to run
+    /// 准备运行
     Ready,
-    /// running
+    /// 运行中
     Running,
-    /// exited
+    /// 已退出
     Zombie,
 }

@@ -1,35 +1,36 @@
-//! `Arc<Inode>` -> `OSInodeInner`: In order to open files concurrently
-//! we need to wrap `Inode` into `Arc`,but `Mutex` in `Inode` prevents
-//! file systems from being accessed simultaneously
+//! `Arc<Inode>` -> `OSInodeInner`: 为了并发打开文件
+//! 我们需要将 `Inode` 包装到 `Arc` 中，但 `Inode` 中的 `Mutex` 阻止
+//! 文件系统被同时访问
 //!
-//! `UPSafeCell<OSInodeInner>` -> `OSInode`: for static `ROOT_INODE`,we
-//! need to wrap `OSInodeInner` into `UPSafeCell`
+//! `UPSafeCell<OSInodeInner>` -> `OSInode`: 对于静态的 `ROOT_INODE`，我们
+//! 需要将 `OSInodeInner` 包装到 `UPSafeCell` 中
 use super::File;
 use crate::drivers::BLOCK_DEVICE;
 use crate::mm::UserBuffer;
 use crate::sync::UPSafeCell;
 use alloc::sync::Arc;
+use alloc::vec;
 use alloc::vec::Vec;
 use bitflags::*;
 use easy_fs::{EasyFileSystem, Inode};
 use lazy_static::*;
 
-/// inode in memory
-/// A wrapper around a filesystem inode
-/// to implement File trait atop
+/// 内存中的 inode
+/// 文件系统 inode 的包装器
+/// 用于在其上实现 File trait
 pub struct OSInode {
     readable: bool,
     writable: bool,
     inner: UPSafeCell<OSInodeInner>,
 }
-/// The OS inode inner in 'UPSafeCell'
+/// 'UPSafeCell' 中的 OS inode 内部结构
 pub struct OSInodeInner {
     offset: usize,
     inode: Arc<Inode>,
 }
 
 impl OSInode {
-    /// create a new inode in memory
+    /// 在内存中创建新的 inode
     pub fn new(readable: bool, writable: bool, inode: Arc<Inode>) -> Self {
         Self {
             readable,
@@ -37,10 +38,10 @@ impl OSInode {
             inner: unsafe { UPSafeCell::new(OSInodeInner { offset: 0, inode }) },
         }
     }
-    /// read all data from the inode
+    /// 从 inode 读取所有数据
     pub fn read_all(&self) -> Vec<u8> {
         let mut inner = self.inner.exclusive_access();
-        let mut buffer: Vec<u8> = Vec::with_capacity(512);
+        let mut buffer: Vec<u8> = vec![0; 512];
         buffer.resize(512, 0);
         let mut v: Vec<u8> = Vec::new();
         loop {
@@ -62,7 +63,7 @@ lazy_static! {
     };
 }
 
-/// List all apps in the root directory
+/// 列出根目录中的所有应用程序
 pub fn list_apps() {
     println!("/**** APPS ****");
     for app in ROOT_INODE.ls() {
@@ -72,24 +73,24 @@ pub fn list_apps() {
 }
 
 bitflags! {
-    ///  The flags argument to the open() system call is constructed by ORing together zero or more of the following values:
+    /// open() 系统调用的 flags 参数通过将以下零个或多个值进行 OR 运算构造：
     pub struct OpenFlags: u32 {
-        /// readyonly
+        /// 只读
         const RDONLY = 0;
-        /// writeonly
+        /// 只写
         const WRONLY = 1 << 0;
-        /// read and write
+        /// 读写
         const RDWR = 1 << 1;
-        /// create new file
+        /// 创建新文件
         const CREATE = 1 << 9;
-        /// truncate file size to 0
+        /// 将文件大小截断为 0
         const TRUNC = 1 << 10;
     }
 }
 
 impl OpenFlags {
-    /// Do not check validity for simplicity
-    /// Return (readable, writable)
+    /// 为简单起见不检查有效性
+    /// 返回 (readable, writable)
     pub fn read_write(&self) -> (bool, bool) {
         if self.is_empty() {
             (true, false)
@@ -101,16 +102,16 @@ impl OpenFlags {
     }
 }
 
-/// Open a file
+/// 打开文件
 pub fn open_file(name: &str, flags: OpenFlags) -> Option<Arc<OSInode>> {
     let (readable, writable) = flags.read_write();
     if flags.contains(OpenFlags::CREATE) {
         if let Some(inode) = ROOT_INODE.find(name) {
-            // clear size
+            // 清空大小
             inode.clear();
             Some(Arc::new(OSInode::new(readable, writable, inode)))
         } else {
-            // create file
+            // 创建文件
             ROOT_INODE
                 .create(name)
                 .map(|inode| Arc::new(OSInode::new(readable, writable, inode)))
@@ -136,7 +137,7 @@ impl File for OSInode {
         let mut inner = self.inner.exclusive_access();
         let mut total_read_size = 0usize;
         for slice in buf.buffers.iter_mut() {
-            let read_size = inner.inode.read_at(inner.offset, *slice);
+            let read_size = inner.inode.read_at(inner.offset, slice);
             if read_size == 0 {
                 break;
             }
@@ -149,7 +150,7 @@ impl File for OSInode {
         let mut inner = self.inner.exclusive_access();
         let mut total_write_size = 0usize;
         for slice in buf.buffers.iter() {
-            let write_size = inner.inode.write_at(inner.offset, *slice);
+            let write_size = inner.inode.write_at(inner.offset, slice);
             assert_eq!(write_size, slice.len());
             inner.offset += write_size;
             total_write_size += write_size;

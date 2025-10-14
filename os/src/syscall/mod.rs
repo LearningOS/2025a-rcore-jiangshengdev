@@ -1,36 +1,35 @@
-//! Implementation of syscalls
+//! 系统调用的实现
 //!
-//! The single entry point to all system calls, [`syscall()`], is called
-//! whenever userspace wishes to perform a system call using the `ecall`
-//! instruction. In this case, the processor raises an 'Environment call from
-//! U-mode' exception, which is handled as one of the cases in
-//! [`crate::trap::trap_handler`].
+//! 所有系统调用的单一入口点 [`syscall()`] 在用户空间希望使用 `ecall`
+//! 指令执行系统调用时被调用。在这种情况下，处理器会引发一个
+//! "来自 U 模式的环境调用"异常，这作为 [`crate::trap::trap_handler`]
+//! 中的一种情况来处理。
 //!
-//! For clarity, each single syscall is implemented as its own function, named
-//! `sys_` then the name of the syscall. You can find functions like this in
-//! submodules, and you should also implement syscalls this way.
+//! 为了清晰起见，每个单独的系统调用都作为自己的函数实现，命名为
+//! `sys_` 加上系统调用的名称。你可以在子模块中找到这样的函数，
+//! 你也应该以这种方式实现系统调用。
 
 /// dup syscall
 const SYSCALL_DUP: usize = 24;
-/// unlinkat syscall
+/// unlinkat 系统调用
 const SYSCALL_UNLINKAT: usize = 35;
-/// linkat syscall
+/// linkat 系统调用
 const SYSCALL_LINKAT: usize = 37;
-/// open syscall
+/// open 系统调用
 const SYSCALL_OPEN: usize = 56;
-/// close syscall
+/// close 系统调用
 const SYSCALL_CLOSE: usize = 57;
 /// pipe syscall
 const SYSCALL_PIPE: usize = 59;
-/// read syscall
+/// read 系统调用
 const SYSCALL_READ: usize = 63;
-/// write syscall
+/// write 系统调用
 const SYSCALL_WRITE: usize = 64;
-/// fstat syscall
+/// fstat 系统调用
 const SYSCALL_FSTAT: usize = 80;
-/// exit syscall
+/// exit 系统调用
 const SYSCALL_EXIT: usize = 93;
-/// yield syscall
+/// yield 系统调用
 const SYSCALL_YIELD: usize = 124;
 /// kill syscall
 const SYSCALL_KILL: usize = 129;
@@ -40,25 +39,25 @@ const SYSCALL_SIGACTION: usize = 134;
 const SYSCALL_SIGPROCMASK: usize = 135;
 /// sigreturn syscall
 const SYSCALL_SIGRETURN: usize = 139;
-/// setpriority syscall
+/// setpriority 系统调用
 const SYSCALL_SET_PRIORITY: usize = 140;
-/// gettime syscall
+/// gettime 系统调用
 const SYSCALL_GET_TIME: usize = 169;
-/// getpid syscall
+/// getpid 系统调用
 const SYSCALL_GETPID: usize = 172;
-/// sbrk syscall
+/// sbrk 系统调用
 const SYSCALL_SBRK: usize = 214;
-/// munmap syscall
+/// munmap 系统调用
 const SYSCALL_MUNMAP: usize = 215;
-/// fork syscall
+/// fork 系统调用
 const SYSCALL_FORK: usize = 220;
-/// exec syscall
+/// exec 系统调用
 const SYSCALL_EXEC: usize = 221;
-/// mmap syscall
+/// mmap 系统调用
 const SYSCALL_MMAP: usize = 222;
-/// waitpid syscall
+/// waitpid 系统调用
 const SYSCALL_WAITPID: usize = 260;
-/// spawn syscall
+/// spawn 系统调用
 const SYSCALL_SPAWN: usize = 400;
 
 mod fs;
@@ -69,7 +68,7 @@ use process::*;
 
 use crate::{fs::Stat, task::SignalAction};
 
-/// handle syscall exception with `syscall_id` and other arguments
+/// 使用 `syscall_id` 和其他参数处理系统调用异常
 pub fn syscall(syscall_id: usize, args: [usize; 4]) -> isize {
     match syscall_id {
         SYSCALL_DUP => sys_dup(args[0]),
