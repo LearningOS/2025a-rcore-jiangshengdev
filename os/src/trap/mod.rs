@@ -30,17 +30,20 @@ global_asm!(include_str!("trap.S"));
 
 /// 初始化陷阱处理
 pub fn init() {
+    // 设置内核陷阱入口点
     set_kernel_trap_entry();
 }
 
 fn set_kernel_trap_entry() {
     unsafe {
+        // 设置stvec寄存器指向内核陷阱处理函数
         stvec::write(trap_from_kernel as usize, TrapMode::Direct);
     }
 }
 
 fn set_user_trap_entry() {
     unsafe {
+        // 设置stvec寄存器指向用户陷阱处理入口（跳板页面）
         stvec::write(TRAMPOLINE, TrapMode::Direct);
     }
 }
@@ -48,6 +51,7 @@ fn set_user_trap_entry() {
 /// 在监管者模式下启用定时器中断
 pub fn enable_timer_interrupt() {
     unsafe {
+        // 设置sie寄存器的STIE位，启用监管者定时器中断
         sie::set_stimer();
     }
 }
@@ -55,21 +59,26 @@ pub fn enable_timer_interrupt() {
 /// 陷阱处理程序
 #[no_mangle]
 pub fn trap_handler() -> ! {
+    // 设置内核陷阱入口点
     set_kernel_trap_entry();
     let scause = scause::read();
     let stval = stval::read();
     // trace!("into {:?}", scause.cause());
+    // 根据陷阱原因进行分发处理
     match scause.cause() {
         Trap::Exception(Exception::UserEnvCall) => {
-            // 无论如何都跳转到下一条指令
+            // 处理用户态系统调用
             let mut cx = current_trap_cx();
+            // 跳转到ecall指令的下一条指令
             cx.sepc += 4;
-            // 获取系统调用返回值
+            // 执行系统调用，参数从寄存器中获取
             let result = syscall(cx.x[17], [cx.x[10], cx.x[11], cx.x[12], cx.x[13]]);
-            // cx 在 sys_exec 期间被改变，所以我们必须再次调用它
+            // 重新获取陷阱上下文（可能在sys_exec中被修改）
             cx = current_trap_cx();
+            // 将系统调用返回值存储到a0寄存器
             cx.x[10] = result as usize;
         }
+        // 处理各种内存访问异常
         Trap::Exception(Exception::StoreFault)
         | Trap::Exception(Exception::StorePageFault)
         | Trap::Exception(Exception::InstructionFault)
@@ -82,13 +91,19 @@ pub fn trap_handler() -> ! {
                 stval,
                 current_trap_cx().sepc,
             );
+            // 向当前进程发送段错误信号
             current_add_signal(SignalFlags::SIGSEGV);
         }
+        // 处理非法指令异常
         Trap::Exception(Exception::IllegalInstruction) => {
+            // 向当前进程发送非法指令信号
             current_add_signal(SignalFlags::SIGILL);
         }
+        // 处理监管者定时器中断
         Trap::Interrupt(Interrupt::SupervisorTimer) => {
+            // 设置下一次定时器中断
             set_next_trigger();
+            // 暂停当前任务，进行任务调度
             suspend_current_and_run_next();
         }
         _ => {
@@ -99,15 +114,16 @@ pub fn trap_handler() -> ! {
             );
         }
     }
-    // handle signals (handle the sent signal)
+    // 处理待处理的信号
     // trace!("[kernel] trap_handler:: handle_signals");
     handle_signals();
 
-    // check error signals (if error then exit)
+    // 检查是否有错误信号需要退出进程
     if let Some((errno, msg)) = check_signals_error_of_current() {
         trace!("[kernel] trap_handler: .. check signals {}", msg);
         exit_current_and_run_next(errno);
     }
+    // 返回用户空间
     trap_return();
 }
 
@@ -117,6 +133,7 @@ pub fn trap_handler() -> ! {
 /// 设置寄存器 a0 = trap_cx_ptr，寄存器 a1 = 用户页表的物理地址，
 /// 最后，跳转到 __restore 汇编函数的新地址
 pub fn trap_return() -> ! {
+    // 设置用户陷阱入口点
     set_user_trap_entry();
     let trap_cx_ptr = TRAP_CONTEXT_BASE;
     let user_satp = current_user_token();
@@ -124,15 +141,16 @@ pub fn trap_return() -> ! {
         fn __alltraps();
         fn __restore();
     }
+    // 计算__restore函数在跳板页面中的虚拟地址
     let restore_va = __restore as usize - __alltraps as usize + TRAMPOLINE;
     // trace!("[kernel] trap_return: ..返回之前");
     unsafe {
         asm!(
-            "fence.i",
-            "jr {restore_va}",
+            "fence.i",           // 指令缓存同步
+            "jr {restore_va}",   // 跳转到__restore函数
             restore_va = in(reg) restore_va,
-            in("a0") trap_cx_ptr,
-            in("a1") user_satp,
+            in("a0") trap_cx_ptr,  // 传递陷阱上下文指针
+            in("a1") user_satp,    // 传递用户页表令牌
             options(noreturn)
         )
     }

@@ -61,6 +61,7 @@ impl MemorySet {
         end_va: VirtAddr,
         permission: MapPermission,
     ) {
+        // 创建一个新的帧式映射区域并添加到内存集合中
         self.push(
             MapArea::new(start_va, end_va, MapType::Framed, permission),
             None,
@@ -81,10 +82,13 @@ impl MemorySet {
     /// 向此 MemorySet 添加一个新的 MapArea。
     /// 假设虚拟地址空间中没有冲突。
     fn push(&mut self, mut map_area: MapArea, data: Option<&[u8]>) {
+        // 在页表中建立映射关系
         map_area.map(&mut self.page_table);
+        // 如果提供了数据，则复制到映射的物理页面中
         if let Some(data) = data {
             map_area.copy_data(&mut self.page_table, data);
         }
+        // 将映射区域添加到区域列表中
         self.areas.push(map_area);
     }
     /// 注意 trampoline 不被 areas 收集。
@@ -98,9 +102,9 @@ impl MemorySet {
     /// 不包含内核栈。
     pub fn new_kernel() -> Self {
         let mut memory_set = Self::new_bare();
-        // 映射 trampoline
+        // 映射 trampoline 页面，用于用户态和内核态之间的切换
         memory_set.map_trampoline();
-        // 映射内核段
+        // 打印内核各段的地址范围信息
         info!(".text [{:#x}, {:#x})", stext as usize, etext as usize);
         info!(".rodata [{:#x}, {:#x})", srodata as usize, erodata as usize);
         info!(".data [{:#x}, {:#x})", sdata as usize, edata as usize);
@@ -176,22 +180,26 @@ impl MemorySet {
     /// 同时返回 user_sp_base 和入口点。
     pub fn from_elf(elf_data: &[u8]) -> (Self, usize, usize) {
         let mut memory_set = Self::new_bare();
-        // 映射 trampoline
+        // 映射 trampoline 页面
         memory_set.map_trampoline();
-        // 映射 elf 的程序头，带有 U 标志
+        // 解析ELF文件并映射程序段
         let elf = xmas_elf::ElfFile::new(elf_data).unwrap();
         let elf_header = elf.header;
         let magic = elf_header.pt1.magic;
+        // 验证ELF魔数
         assert_eq!(magic, [0x7f, 0x45, 0x4c, 0x46], "无效的 elf！");
         let ph_count = elf_header.pt2.ph_count();
         let mut max_end_vpn = VirtPageNum(0);
+        // 遍历所有程序头，映射可加载段
         for i in 0..ph_count {
             let ph = elf.program_header(i).unwrap();
             if ph.get_type().unwrap() == xmas_elf::program::Type::Load {
                 let start_va: VirtAddr = (ph.virtual_addr() as usize).into();
                 let end_va: VirtAddr = ((ph.virtual_addr() + ph.mem_size()) as usize).into();
+                // 设置用户态访问权限
                 let mut map_perm = MapPermission::U;
                 let ph_flags = ph.flags();
+                // 根据程序头标志设置页面权限
                 if ph_flags.is_read() {
                     map_perm |= MapPermission::R;
                 }
@@ -203,16 +211,17 @@ impl MemorySet {
                 }
                 let map_area = MapArea::new(start_va, end_va, MapType::Framed, map_perm);
                 max_end_vpn = map_area.vpn_range.get_end();
+                // 映射段并复制数据
                 memory_set.push(
                     map_area,
                     Some(&elf.input[ph.offset() as usize..(ph.offset() + ph.file_size()) as usize]),
                 );
             }
         }
-        // 映射带有 U 标志的用户栈
+        // 在程序段之后映射用户栈
         let max_end_va: VirtAddr = max_end_vpn.into();
         let mut user_stack_bottom: usize = max_end_va.into();
-        // 保护页
+        // 添加一个保护页，防止栈溢出
         user_stack_bottom += PAGE_SIZE;
         let user_stack_top = user_stack_bottom + USER_STACK_SIZE;
         memory_set.push(
@@ -274,7 +283,9 @@ impl MemorySet {
     pub fn activate(&self) {
         let satp = self.page_table.token();
         unsafe {
+            // 设置SATP寄存器，切换到当前页表
             satp::write(satp);
+            // 刷新TLB，确保地址翻译使用新的页表
             asm!("sfence.vma");
         }
     }
@@ -353,15 +364,18 @@ impl MapArea {
     pub fn map_one(&mut self, page_table: &mut PageTable, vpn: VirtPageNum) {
         let ppn: PhysPageNum;
         match self.map_type {
+            // 恒等映射：虚拟页号等于物理页号
             MapType::Identical => {
                 ppn = PhysPageNum(vpn.0);
             }
+            // 帧式映射：分配新的物理页面
             MapType::Framed => {
                 let frame = frame_alloc().unwrap();
                 ppn = frame.ppn;
                 self.data_frames.insert(vpn, frame);
             }
         }
+        // 转换权限标志并建立页表映射
         let pte_flags = PTEFlags::from_bits(self.map_perm.bits).unwrap();
         page_table.map(vpn, ppn, pte_flags);
     }
@@ -402,8 +416,10 @@ impl MapArea {
         let mut start: usize = 0;
         let mut current_vpn = self.vpn_range.get_start();
         let len = data.len();
+        // 按页面大小分块复制数据
         loop {
             let src = &data[start..len.min(start + PAGE_SIZE)];
+            // 获取目标物理页面并复制数据
             let dst = &mut page_table
                 .translate(current_vpn)
                 .unwrap()

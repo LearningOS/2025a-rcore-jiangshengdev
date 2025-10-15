@@ -19,11 +19,12 @@ impl File for Stdin {
     }
     fn read(&self, mut user_buf: UserBuffer) -> usize {
         assert_eq!(user_buf.len(), 1);
-        // 忙等循环
+        // 从控制台读取一个字符
         let mut c: usize;
         loop {
             c = console_getchar();
             if c == 0 {
+                // 没有字符可读，暂停当前任务等待输入
                 suspend_current_and_run_next();
                 continue;
             } else {
@@ -31,6 +32,7 @@ impl File for Stdin {
             }
         }
         let ch = c as u8;
+        // 将读取的字符写入用户缓冲区
         unsafe {
             user_buf.buffers[0].as_mut_ptr().write_volatile(ch);
         }
@@ -52,6 +54,7 @@ impl File for Stdout {
         panic!("Cannot read from stdout!");
     }
     fn write(&self, user_buf: UserBuffer) -> usize {
+        // 遍历用户缓冲区的所有片段并输出到控制台
         for buffer in user_buf.buffers.iter() {
             print!("{}", core::str::from_utf8(buffer).unwrap());
         }

@@ -30,9 +30,11 @@ static USER_STACK: UserStack = UserStack {
 
 impl KernelStack {
     fn get_sp(&self) -> usize {
+        // 返回内核栈的栈顶地址
         self.data.as_ptr() as usize + KERNEL_STACK_SIZE
     }
     pub fn push_context(&self, cx: TrapContext) -> &'static mut TrapContext {
+        // 在内核栈顶压入陷阱上下文
         let cx_ptr = (self.get_sp() - core::mem::size_of::<TrapContext>()) as *mut TrapContext;
         unsafe {
             *cx_ptr = cx;
@@ -43,6 +45,7 @@ impl KernelStack {
 
 impl UserStack {
     fn get_sp(&self) -> usize {
+        // 返回用户栈的栈顶地址
         self.data.as_ptr() as usize + USER_STACK_SIZE
     }
 }
@@ -67,21 +70,24 @@ impl AppManager {
     }
 
     unsafe fn load_app(&self, app_id: usize) {
+        // 检查是否所有应用程序都已运行完毕
         if app_id >= self.num_app {
             println!("All applications completed!");
             use crate::board::QEMUExit;
             crate::board::QEMU_EXIT_HANDLE.exit_success();
         }
         println!("[kernel] Loading app_{}", app_id);
-        // 清空应用程序区域
+        // 清空应用程序加载区域
         core::slice::from_raw_parts_mut(APP_BASE_ADDRESS as *mut u8, APP_SIZE_LIMIT).fill(0);
+        // 获取应用程序数据源
         let app_src = core::slice::from_raw_parts(
             self.app_start[app_id] as *const u8,
             self.app_start[app_id + 1] - self.app_start[app_id],
         );
+        // 将应用程序数据复制到加载地址
         let app_dst = core::slice::from_raw_parts_mut(APP_BASE_ADDRESS as *mut u8, app_src.len());
         app_dst.copy_from_slice(app_src);
-        // 关于获取指令内存的内存屏障
+        // 指令内存屏障，确保指令缓存与内存同步
         // 保证后续的指令获取必须观察到所有之前对指令内存的写入。
         // 因此，在我们将下一个应用程序的代码加载到指令内存后，
         // 必须执行 fence.i。
@@ -134,16 +140,18 @@ pub fn run_next_app() -> ! {
     let mut app_manager = APP_MANAGER.exclusive_access();
     let current_app = app_manager.get_current_app();
     unsafe {
+        // 加载当前应用程序到内存
         app_manager.load_app(current_app);
     }
+    // 移动到下一个应用程序
     app_manager.move_to_next_app();
     drop(app_manager);
-    // 在此之前我们必须手动丢弃与资源相关的局部变量
-    // 并释放资源
+    // 手动释放资源，准备切换到用户态
     extern "C" {
         fn __restore(cx_addr: usize);
     }
     unsafe {
+        // 初始化陷阱上下文并切换到用户态执行应用程序
         __restore(KERNEL_STACK.push_context(TrapContext::app_init_context(
             APP_BASE_ADDRESS,
             USER_STACK.get_sp(),

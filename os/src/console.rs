@@ -6,6 +6,7 @@ struct Stdout;
 
 impl Write for Stdout {
     fn write_str(&mut self, s: &str) -> fmt::Result {
+        // 逐字节输出字符串到控制台
         for b in s.bytes() {
             console_putchar(b as usize);
         }
@@ -14,6 +15,7 @@ impl Write for Stdout {
 }
 
 pub fn print(args: fmt::Arguments) {
+    // 使用Stdout结构体格式化并输出参数
     Stdout.write_fmt(args).unwrap();
 }
 

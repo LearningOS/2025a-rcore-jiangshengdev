@@ -1,34 +1,86 @@
 use crate::task::{SignalFlags, MAX_SIG};
 
-/// Action for a signal
+/// 信号处理动作结构
+/// 
+/// 定义了当进程接收到特定信号时应该执行的动作。
+/// 每个信号都可以有自己的处理动作，包括处理函数地址和信号掩码。
+/// 
+/// 内存布局：
+/// - 使用C语言兼容的内存布局，便于与用户空间交互
+/// - 16字节对齐，确保在不同架构上的兼容性
 #[repr(C, align(16))]
 #[derive(Debug, Clone, Copy)]
 pub struct SignalAction {
-    /// Signal handler address
+    /// 信号处理函数的地址
+    /// 
+    /// - 如果为0，表示使用默认处理动作
+    /// - 如果为1，表示忽略该信号
+    /// - 其他值表示用户自定义处理函数的地址
     pub handler: usize,
-    /// Signal mask
+    
+    /// 信号掩码
+    /// 
+    /// 在执行信号处理函数期间，这些信号将被阻塞。
+    /// 这可以防止信号处理函数被其他信号中断，
+    /// 确保信号处理的原子性和一致性。
     pub mask: SignalFlags,
 }
 
 impl Default for SignalAction {
+    /// 创建默认的信号处理动作
+    /// 
+    /// 默认配置：
+    /// - handler = 0：使用系统默认处理动作
+    /// - mask = 40：设置默认的信号掩码
+    /// 
+    /// 这个默认配置适用于大多数信号，提供了合理的
+    /// 初始行为，用户可以根据需要进行自定义。
     fn default() -> Self {
         Self {
+            // 使用默认处理动作（通常是终止进程）
             handler: 0,
+            // 设置默认信号掩码，阻塞某些信号
             mask: SignalFlags::from_bits(40).unwrap(),
         }
     }
 }
 
-/// Signal actions
+/// 信号处理动作表
+/// 
+/// 存储进程中所有信号的处理动作配置。每个进程都有自己的
+/// 信号动作表，用于定义如何响应不同的信号。
+/// 
+/// 设计特点：
+/// - 使用数组索引直接映射信号编号，提供O(1)的访问性能
+/// - 支持克隆，便于在fork时复制父进程的信号配置
+/// - 涵盖所有可能的信号类型（0到MAX_SIG）
 #[derive(Clone)]
 pub struct SignalActions {
-    /// Signal actions table
+    /// 信号处理动作表
+    /// 
+    /// 数组索引对应信号编号，每个元素包含该信号的处理配置。
+    /// 例如：table[SIGINT]包含SIGINT信号的处理动作。
+    /// 
+    /// 数组大小为MAX_SIG + 1，确保能够存储所有有效的信号编号。
     pub table: [SignalAction; MAX_SIG + 1],
 }
 
 impl Default for SignalActions {
+    /// 创建默认的信号动作表
+    /// 
+    /// 初始化过程：
+    /// - 为所有信号设置默认的处理动作
+    /// - 每个信号都使用SignalAction::default()的配置
+    /// - 确保新创建的进程有合理的信号处理行为
+    /// 
+    /// 这个默认配置在以下情况下使用：
+    /// - 创建新进程时的初始信号配置
+    /// - 重置信号处理动作到默认状态
+    /// - 为没有特殊信号处理需求的进程提供基础配置
     fn default() -> Self {
         Self {
+            // 为所有信号位置初始化默认的处理动作
+            // 这确保了每个信号都有明确定义的行为
             table: [SignalAction::default(); MAX_SIG + 1],
         }
     }

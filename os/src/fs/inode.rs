@@ -35,21 +35,26 @@ impl OSInode {
         Self {
             readable,
             writable,
+            // 初始化内部结构，文件偏移量从0开始
             inner: unsafe { UPSafeCell::new(OSInodeInner { offset: 0, inode }) },
         }
     }
     /// 从 inode 读取所有数据
     pub fn read_all(&self) -> Vec<u8> {
         let mut inner = self.inner.exclusive_access();
+        // 创建512字节的缓冲区用于分块读取
         let mut buffer: Vec<u8> = vec![0; 512];
         buffer.resize(512, 0);
         let mut v: Vec<u8> = Vec::new();
+        // 循环读取文件的所有内容
         loop {
             let len = inner.inode.read_at(inner.offset, &mut buffer);
             if len == 0 {
                 break;
             }
+            // 更新文件偏移量
             inner.offset += len;
+            // 将读取的数据添加到结果向量中
             v.extend_from_slice(&buffer[..len]);
         }
         v
@@ -66,6 +71,7 @@ lazy_static! {
 /// 列出根目录中的所有应用程序
 pub fn list_apps() {
     println!("/**** APPS ****");
+    // 遍历根目录中的所有文件并打印文件名
     for app in ROOT_INODE.ls() {
         println!("{}", app);
     }
@@ -92,11 +98,15 @@ impl OpenFlags {
     /// 为简单起见不检查有效性
     /// 返回 (readable, writable)
     pub fn read_write(&self) -> (bool, bool) {
+        // 根据打开标志确定文件的读写权限
         if self.is_empty() {
+            // 默认为只读
             (true, false)
         } else if self.contains(Self::WRONLY) {
+            // 只写模式
             (false, true)
         } else {
+            // 读写模式
             (true, true)
         }
     }
@@ -104,20 +114,24 @@ impl OpenFlags {
 
 /// 打开文件
 pub fn open_file(name: &str, flags: OpenFlags) -> Option<Arc<OSInode>> {
+    // 根据标志确定文件的读写权限
     let (readable, writable) = flags.read_write();
     if flags.contains(OpenFlags::CREATE) {
+        // 如果设置了CREATE标志
         if let Some(inode) = ROOT_INODE.find(name) {
-            // 清空大小
+            // 文件已存在，清空文件内容
             inode.clear();
             Some(Arc::new(OSInode::new(readable, writable, inode)))
         } else {
-            // 创建文件
+            // 文件不存在，创建新文件
             ROOT_INODE
                 .create(name)
                 .map(|inode| Arc::new(OSInode::new(readable, writable, inode)))
         }
     } else {
+        // 打开已存在的文件
         ROOT_INODE.find(name).map(|inode| {
+            // 如果设置了TRUNC标志，清空文件内容
             if flags.contains(OpenFlags::TRUNC) {
                 inode.clear();
             }
@@ -136,11 +150,13 @@ impl File for OSInode {
     fn read(&self, mut buf: UserBuffer) -> usize {
         let mut inner = self.inner.exclusive_access();
         let mut total_read_size = 0usize;
+        // 遍历用户缓冲区的所有片段
         for slice in buf.buffers.iter_mut() {
             let read_size = inner.inode.read_at(inner.offset, slice);
             if read_size == 0 {
                 break;
             }
+            // 更新文件偏移量
             inner.offset += read_size;
             total_read_size += read_size;
         }
@@ -149,9 +165,12 @@ impl File for OSInode {
     fn write(&self, buf: UserBuffer) -> usize {
         let mut inner = self.inner.exclusive_access();
         let mut total_write_size = 0usize;
+        // 遍历用户缓冲区的所有片段
         for slice in buf.buffers.iter() {
             let write_size = inner.inode.write_at(inner.offset, slice);
+            // 确保写入的字节数等于片段大小
             assert_eq!(write_size, slice.len());
+            // 更新文件偏移量
             inner.offset += write_size;
             total_write_size += write_size;
         }

@@ -22,6 +22,7 @@ pub struct TrapContext {
 impl TrapContext {
     /// 将 sp（栈指针）放入 TrapContext 的 x[2] 字段
     pub fn set_sp(&mut self, sp: usize) {
+        // x[2]寄存器对应RISC-V的sp（栈指针）寄存器
         self.x[2] = sp;
     }
     /// 初始化应用程序的陷阱上下文
@@ -33,17 +34,24 @@ impl TrapContext {
         trap_handler: usize,
     ) -> Self {
         let mut sstatus = sstatus::read();
-        // 陷阱返回后将 CPU 特权级设置为用户态
+        // 设置陷阱返回后的特权级为用户态
         sstatus.set_spp(SPP::User);
         let mut cx = Self {
+            // 初始化所有通用寄存器为0
             x: [0; 32],
             sstatus,
-            sepc: entry,  // 应用程序入口点
-            kernel_satp,  // 页表地址
-            kernel_sp,    // 内核栈
-            trap_handler, // trap_handler 函数地址
+            // 设置程序计数器为应用程序入口点
+            sepc: entry,
+            // 设置内核页表令牌
+            kernel_satp,
+            // 设置内核栈指针
+            kernel_sp,
+            // 设置陷阱处理函数地址
+            trap_handler,
         };
-        cx.set_sp(sp); // 应用程序的用户栈指针
-        cx // 返回应用程序的初始陷阱上下文
+        // 设置用户栈指针
+        cx.set_sp(sp);
+        // 返回初始化完成的陷阱上下文
+        cx
     }
 }

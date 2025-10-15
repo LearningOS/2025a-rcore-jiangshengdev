@@ -36,6 +36,7 @@ const fn exit_code_encode(code: u32) -> u32 {
 impl RISCV64 {
     /// 创建一个实例。
     pub const fn new(addr: u64) -> Self {
+        // 创建RISCV64退出处理器实例，指定sifive_test设备地址
         RISCV64 { addr }
     }
 }
@@ -43,19 +44,20 @@ impl RISCV64 {
 impl QEMUExit for RISCV64 {
     /// 使用指定的退出代码退出 qemu。
     fn exit(&self, code: u32) -> ! {
-        // 如果代码不是特殊值，我们需要使用 EXIT_FAILURE_FLAG 对其进行编码。
+        // 对非特殊退出代码进行编码处理
         let code_new = match code {
             EXIT_SUCCESS | EXIT_FAILURE | EXIT_RESET => code,
             _ => exit_code_encode(code),
         };
 
         unsafe {
+            // 向sifive_test设备写入退出代码
             asm!(
                 "sw {0}, 0({1})",
                 in(reg)code_new, in(reg)self.addr
             );
 
-            // 对于 QEMU 退出尝试不起作用的情况，转入无限循环。
+            // 如果QEMU退出失败，进入无限循环等待
             // 在这里调用 `panic!()` 是不可行的，因为很有可能
             // 这个函数本身就是 `panic!()` 处理程序中的最后一个表达式。
             // 这可以防止可能的无限循环。
@@ -66,10 +68,12 @@ impl QEMUExit for RISCV64 {
     }
 
     fn exit_success(&self) -> ! {
+        // 以成功状态退出QEMU
         self.exit(EXIT_SUCCESS);
     }
 
     fn exit_failure(&self) -> ! {
+        // 以失败状态退出QEMU
         self.exit(EXIT_FAILURE);
     }
 }

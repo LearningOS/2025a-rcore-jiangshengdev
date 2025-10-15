@@ -13,6 +13,7 @@ static mut HEAP_SPACE: [u8; KERNEL_HEAP_SIZE] = [0; KERNEL_HEAP_SIZE];
 /// 初始化堆分配器
 pub fn init_heap() {
     unsafe {
+        // 使用静态分配的堆空间初始化buddy系统分配器
         HEAP_ALLOCATOR
             .lock()
             .init(HEAP_SPACE.as_ptr() as usize, KERNEL_HEAP_SIZE);
@@ -22,5 +23,6 @@ pub fn init_heap() {
 #[alloc_error_handler]
 /// 当堆分配错误发生时触发 panic
 pub fn handle_alloc_error(layout: core::alloc::Layout) -> ! {
+    // 堆分配失败时的错误处理，打印布局信息并终止程序
     panic!("Heap allocation error, layout = {:?}", layout);
 }

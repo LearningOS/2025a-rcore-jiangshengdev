@@ -25,7 +25,10 @@ pub use page_table::{
 
 /// 初始化堆分配器、帧分配器和内核空间
 pub fn init() {
+    // 初始化堆分配器，为内核提供动态内存分配能力
     heap_allocator::init_heap();
+    // 初始化物理帧分配器，管理物理内存页面的分配和回收
     frame_allocator::init_frame_allocator();
+    // 激活内核地址空间，建立内核虚拟内存映射
     KERNEL_SPACE.exclusive_access().activate();
 }

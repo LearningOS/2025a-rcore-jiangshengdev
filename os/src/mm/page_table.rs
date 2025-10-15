@@ -30,6 +30,7 @@ pub struct PageTableEntry {
 impl PageTableEntry {
     /// 创建一个新的页表项
     pub fn new(ppn: PhysPageNum, flags: PTEFlags) -> Self {
+        // 页表项格式：高44位为物理页号，低10位为标志位
         PageTableEntry {
             bits: ppn.0 << 10 | flags.bits as usize,
         }
@@ -40,6 +41,7 @@ impl PageTableEntry {
     }
     /// 从页表项中获取物理页号
     pub fn ppn(&self) -> PhysPageNum {
+        // 右移10位去掉标志位，然后取低44位作为物理页号
         (self.bits >> 10 & ((1usize << 44) - 1)).into()
     }
     /// 从页表项中获取标志位
@@ -95,38 +97,48 @@ impl PageTable {
     }
     /// 通过虚拟页号查找页表项，如果不存在则为 4KB 页表创建一个帧
     fn find_pte_create(&mut self, vpn: VirtPageNum) -> Option<&mut PageTableEntry> {
+        // 获取三级页表索引
         let idxs = vpn.indexes();
         let mut ppn = self.root_ppn;
         let mut result: Option<&mut PageTableEntry> = None;
+        // 遍历三级页表
         for (i, idx) in idxs.iter().enumerate() {
             let pte = &mut ppn.get_pte_array()[*idx];
+            // 如果是最后一级页表（叶子节点）
             if i == 2 {
                 result = Some(pte);
                 break;
             }
+            // 如果页表项无效，需要分配新的页表页面
             if !pte.is_valid() {
                 let frame = frame_alloc().unwrap();
                 *pte = PageTableEntry::new(frame.ppn, PTEFlags::V);
                 self.frames.push(frame);
             }
+            // 继续到下一级页表
             ppn = pte.ppn();
         }
         result
     }
     /// 通过虚拟页号查找页表项
     fn find_pte(&self, vpn: VirtPageNum) -> Option<&mut PageTableEntry> {
+        // 获取三级页表索引
         let idxs = vpn.indexes();
         let mut ppn = self.root_ppn;
         let mut result: Option<&mut PageTableEntry> = None;
+        // 遍历三级页表
         for (i, idx) in idxs.iter().enumerate() {
             let pte = &mut ppn.get_pte_array()[*idx];
+            // 如果是最后一级页表（叶子节点）
             if i == 2 {
                 result = Some(pte);
                 break;
             }
+            // 如果中间级页表项无效，说明映射不存在
             if !pte.is_valid() {
                 return None;
             }
+            // 继续到下一级页表
             ppn = pte.ppn();
         }
         result
@@ -152,14 +164,18 @@ impl PageTable {
     /// 从虚拟地址获取物理地址
     pub fn translate_va(&self, va: VirtAddr) -> Option<PhysAddr> {
         self.find_pte(va.clone().floor()).map(|pte| {
+            // 获取页面对齐的物理地址
             let aligned_pa: PhysAddr = pte.ppn().into();
+            // 获取虚拟地址的页内偏移
             let offset = va.page_offset();
             let aligned_pa_usize: usize = aligned_pa.into();
+            // 物理地址 = 页面基址 + 页内偏移
             (aligned_pa_usize + offset).into()
         })
     }
     /// 从页表获取令牌
     pub fn token(&self) -> usize {
+        // SATP寄存器格式：高4位为模式(SV39=8)，低44位为根页表物理页号
         8usize << 60 | self.root_ppn.0
     }
 }
@@ -170,13 +186,17 @@ pub fn translated_byte_buffer(token: usize, ptr: *const u8, len: usize) -> Vec<&
     let mut start = ptr as usize;
     let end = start + len;
     let mut v = Vec::new();
+    // 按页面边界分割缓冲区
     while start < end {
         let start_va = VirtAddr::from(start);
         let mut vpn = start_va.floor();
+        // 翻译虚拟页号到物理页号
         let ppn = page_table.translate(vpn).unwrap().ppn();
         vpn.step();
         let mut end_va: VirtAddr = vpn.into();
+        // 确保不超过缓冲区末尾
         end_va = end_va.min(VirtAddr::from(end));
+        // 添加当前页面的字节片段
         if end_va.page_offset() == 0 {
             v.push(&mut ppn.get_bytes_array()[start_va.page_offset()..]);
         } else {
@@ -192,11 +212,14 @@ pub fn translated_str(token: usize, ptr: *const u8) -> String {
     let page_table = PageTable::from_token(token);
     let mut string = String::new();
     let mut va = ptr as usize;
+    // 逐字节读取直到遇到空字符
     loop {
+        // 翻译虚拟地址并读取字节
         let ch: u8 = *(page_table
             .translate_va(VirtAddr::from(va))
             .unwrap()
             .get_mut());
+        // 遇到字符串结束符则停止
         if ch == 0 {
             break;
         }
@@ -244,7 +267,7 @@ impl UserBuffer {
         }
         total
     }
-    /// Check whether the buffer has no data
+    /// 检查缓冲区是否为空
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }

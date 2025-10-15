@@ -21,11 +21,13 @@ impl<T> UPSafeCell<T> {
     /// 单处理器中使用。
     pub unsafe fn new(value: T) -> Self {
         Self {
+            // 使用RefCell提供内部可变性
             inner: RefCell::new(value),
         }
     }
     /// 如果数据已被借用则会 panic。
     pub fn exclusive_access(&self) -> RefMut<'_, T> {
+        // 获取内部数据的可变引用，如果已被借用则panic
         self.inner.borrow_mut()
     }
 }
