@@ -231,15 +231,10 @@ pub fn sys_sigreturn() -> isize {
 }
 
 fn check_sigaction_error(signal: SignalFlags, action: usize, old_action: usize) -> bool {
-    if action == 0
+    action == 0
         || old_action == 0
         || signal == SignalFlags::SIGKILL
         || signal == SignalFlags::SIGSTOP
-    {
-        true
-    } else {
-        false
-    }
 }
 
 pub fn sys_sigaction(

@@ -12,6 +12,10 @@ pub struct MailMessage {
     data: [u8; MAILBOX_MAX_MSG_LEN],
 }
 
+/// 邮箱写入失败时的错误类型。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MailboxFull;
+
 impl MailMessage {
     /// 通过指定长度与数据构造报文，超长会触发断言。
     pub fn from_parts(len: usize, data: [u8; MAILBOX_MAX_MSG_LEN]) -> Self {
@@ -24,6 +28,11 @@ impl MailMessage {
         self.len
     }
 
+    /// 判断报文是否为空。
+    pub fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+
     /// 获取报文负载的只读切片。
     pub fn as_slice(&self) -> &[u8] {
         &self.data[..self.len]
@@ -33,6 +42,12 @@ impl MailMessage {
 /// 简单的 FIFO 邮箱，容量受限。
 pub struct MailBox {
     queue: VecDeque<MailMessage>,
+}
+
+impl Default for MailBox {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl MailBox {
@@ -53,10 +68,10 @@ impl MailBox {
         self.queue.len() >= MAILBOX_CAPACITY
     }
 
-    /// 入队报文；若邮箱已满则返回原始报文。
-    pub fn push(&mut self, message: MailMessage) -> Result<(), MailMessage> {
+    /// 入队报文；若邮箱已满则返回错误。
+    pub fn push(&mut self, message: MailMessage) -> Result<(), MailboxFull> {
         if self.is_full() {
-            Err(message)
+            Err(MailboxFull)
         } else {
             self.queue.push_back(message);
             Ok(())

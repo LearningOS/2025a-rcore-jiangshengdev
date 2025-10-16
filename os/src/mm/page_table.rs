@@ -71,6 +71,12 @@ pub struct PageTable {
 }
 
 /// Assume that it won't oom when creating/mapping.
+impl Default for PageTable {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl PageTable {
     /// Create a new page table
     pub fn new() -> Self {
@@ -236,6 +242,10 @@ impl UserBuffer {
             total += b.len();
         }
         total
+    }
+    /// Check whether the buffer has zero length
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
     }
 }
 
