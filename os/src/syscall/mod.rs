@@ -60,11 +60,17 @@ const SYSCALL_MMAP: usize = 222;
 const SYSCALL_WAITPID: usize = 260;
 /// spawn syscall
 const SYSCALL_SPAWN: usize = 400;
+/// mail read syscall
+const SYSCALL_MAIL_READ: usize = 401;
+/// mail write syscall
+const SYSCALL_MAIL_WRITE: usize = 402;
 
 mod fs;
+mod mailbox;
 mod process;
 
 use fs::*;
+use mailbox::*;
 use process::*;
 
 use crate::{fs::Stat, task::SignalAction};
@@ -101,6 +107,8 @@ pub fn syscall(syscall_id: usize, args: [usize; 4]) -> isize {
         SYSCALL_SBRK => sys_sbrk(args[0] as i32),
         SYSCALL_SPAWN => sys_spawn(args[0] as *const u8),
         SYSCALL_SET_PRIORITY => sys_set_priority(args[0] as isize),
+        SYSCALL_MAIL_READ => sys_mail_read(args[0] as *mut u8, args[1]),
+        SYSCALL_MAIL_WRITE => sys_mail_write(args[0], args[1] as *const u8, args[2]),
         _ => panic!("Unsupported syscall_id: {}", syscall_id),
     }
 }

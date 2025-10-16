@@ -1,7 +1,8 @@
 //! Types related to task management & Functions for completely changing TCB
 
 use super::{
-    kstack_alloc, pid_alloc, KernelStack, PidHandle, SignalActions, SignalFlags, TaskContext,
+    kstack_alloc, mailbox::MailBox, pid_alloc, KernelStack, PidHandle, SignalActions, SignalFlags,
+    TaskContext,
 };
 use crate::{
     config::TRAP_CONTEXT_BASE,
@@ -72,6 +73,7 @@ pub struct TaskControlBlockInner {
     /// It is set when active exit or execution error occurs
     pub exit_code: i32,
     pub fd_table: Vec<Option<Arc<dyn File + Send + Sync>>>,
+    pub mailbox: MailBox,
     pub signals: SignalFlags,
     pub signal_mask: SignalFlags,
     // the signal which is being handling
@@ -151,6 +153,7 @@ impl TaskControlBlock {
                         // 2 -> stderr
                         Some(Arc::new(Stdout)),
                     ],
+                    mailbox: MailBox::new(),
                     signals: SignalFlags::empty(),
                     signal_mask: SignalFlags::empty(),
                     handling_sig: -1,
@@ -265,6 +268,7 @@ impl TaskControlBlock {
                     children: Vec::new(),
                     exit_code: 0,
                     fd_table: new_fd_table,
+                    mailbox: MailBox::new(),
                     signals: SignalFlags::empty(),
                     // inherit the signal_mask and signal_action
                     signal_mask: parent_inner.signal_mask,

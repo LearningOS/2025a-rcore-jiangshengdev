@@ -12,6 +12,7 @@
 mod action;
 mod context;
 mod id;
+mod mailbox;
 mod manager;
 mod processor;
 mod signal;
@@ -23,6 +24,7 @@ use crate::fs::{open_file, OpenFlags};
 use alloc::sync::Arc;
 pub use context::TaskContext;
 use lazy_static::*;
+pub use mailbox::{MailBox, MailMessage, MAILBOX_CAPACITY, MAILBOX_MAX_MSG_LEN};
 use manager::fetch_task;
 use manager::remove_from_pid2task;
 use switch::__switch;
