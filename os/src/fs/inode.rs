@@ -8,7 +8,7 @@ use super::File;
 use crate::drivers::BLOCK_DEVICE;
 use crate::mm::UserBuffer;
 use crate::sync::UPSafeCell;
-use alloc::sync::Arc;
+use alloc::{string::String, sync::Arc};
 use alloc::vec::Vec;
 use bitflags::*;
 use easy_fs::{EasyFileSystem, Inode};
@@ -65,7 +65,9 @@ lazy_static! {
 /// List all apps in the root directory
 pub fn list_apps() {
     println!("/**** APPS ****");
-    for app in ROOT_INODE.ls() {
+    let mut apps: Vec<String> = ROOT_INODE.ls();
+    apps.sort();
+    for app in apps {
         println!("{}", app);
     }
     println!("**************/");
