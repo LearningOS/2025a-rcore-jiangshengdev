@@ -68,22 +68,22 @@ pub fn rust_main() -> ! {
     // 清空BSS段，为内核运行准备干净的内存环境
     clear_bss();
     println!("[kernel] Hello, world!");
-    
+
     // 初始化日志系统，用于内核调试和信息输出
     logging::init();
-    
+
     // 初始化内存管理子系统
     mm::init();
     // 测试内存重映射功能是否正常工作
     mm::remap_test();
-    
+
     // 初始化陷阱处理机制，处理异常和中断
     trap::init();
     // 启用定时器中断，用于任务调度
     trap::enable_timer_interrupt();
     // 设置下一次定时器中断的触发时间
     timer::set_next_trigger();
-    
+
     // 列出可用的应用程序
     fs::list_apps();
     // 添加初始进程到任务队列
