@@ -81,8 +81,6 @@ pub fn list_apps() {
 bitflags! {
     /// open() 系统调用的 flags 参数通过将以下零个或多个值进行 OR 运算构造：
     pub struct OpenFlags: u32 {
-        /// 只读
-        const RDONLY = 0;
         /// 只写
         const WRONLY = 1 << 0;
         /// 读写
@@ -95,6 +93,8 @@ bitflags! {
 }
 
 impl OpenFlags {
+    /// 只读
+    pub const RDONLY: OpenFlags = OpenFlags::empty();
     /// 为简单起见不检查有效性
     /// 返回 (readable, writable)
     pub fn read_write(&self) -> (bool, bool) {

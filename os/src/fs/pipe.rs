@@ -90,6 +90,12 @@ pub struct PipeRingBuffer {
     write_end: Option<Weak<Pipe>>,
 }
 
+impl Default for PipeRingBuffer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl PipeRingBuffer {
     /// 创建新的空环形缓冲区
     /// 

@@ -38,13 +38,16 @@ bitflags! {
     /// inode 的模式
     /// 是目录还是文件
     pub struct StatMode: u32 {
-        /// 空
-        const NULL  = 0;
         /// 目录
         const DIR   = 0o040000;
         /// 普通常规文件
         const FILE  = 0o100000;
     }
+}
+
+impl StatMode {
+    /// 空
+    pub const NULL: StatMode = StatMode::empty();
 }
 
 pub use inode::{list_apps, open_file, OSInode, OpenFlags};
