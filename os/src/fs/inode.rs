@@ -71,8 +71,10 @@ lazy_static! {
 /// 列出根目录中的所有应用程序
 pub fn list_apps() {
     println!("/**** APPS ****");
+    let mut apps = ROOT_INODE.ls();
+    apps.sort();
     // 遍历根目录中的所有文件并打印文件名
-    for app in ROOT_INODE.ls() {
+    for app in apps {
         println!("{}", app);
     }
     println!("**************/");
