@@ -4,6 +4,7 @@ use super::{
 };
 use crate::BLOCK_SZ;
 use alloc::sync::Arc;
+use core::fmt;
 use spin::Mutex;
 
 /// 位图块管理的数据块容量
@@ -25,6 +26,36 @@ pub struct EasyFileSystem {
 }
 
 type DataBlock = [u8; BLOCK_SZ];
+
+impl fmt::Debug for EasyFileSystem {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if f.alternate() {
+            f.debug_struct("EasyFileSystem")
+                .field("block_device", &"<BlockDevice>")
+                .field("inode_bitmap", &self.inode_bitmap)
+                .field("data_bitmap", &self.data_bitmap)
+                .field("inode_area_start_block", &self.inode_area_start_block)
+                .field("data_area_start_block", &self.data_area_start_block)
+                .finish()
+        } else {
+            f.write_str("EasyFileSystem {\n")?;
+            writeln!(f, "    block_device: \"<BlockDevice>\",")?;
+            writeln!(f, "    inode_bitmap: {:?},", self.inode_bitmap)?;
+            writeln!(f, "    data_bitmap: {:?},", self.data_bitmap)?;
+            writeln!(
+                f,
+                "    inode_area_start_block: {},",
+                self.inode_area_start_block
+            )?;
+            write!(
+                f,
+                "    data_area_start_block: {}\n}}",
+                self.data_area_start_block
+            )
+        }
+    }
+}
+
 /// 基于块设备的简易文件系统
 impl EasyFileSystem {
     /// 在块设备上创建新的文件系统

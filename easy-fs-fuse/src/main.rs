@@ -60,6 +60,9 @@ fn easy_fs_pack() -> std::io::Result<()> {
     })));
     // 160MiB, at most 4095 files
     let efs = EasyFileSystem::create(block_file, 160 * 2048, 1);
+    
+    println!("{:#?}", efs);
+    
     let root_inode = Arc::new(EasyFileSystem::root_inode(&efs));
     let apps: Vec<_> = read_dir(src_path)
         .unwrap()

@@ -6,6 +6,7 @@ type BitmapBlock = [u64; 64];
 /// 一个块中的位数
 const BLOCK_BITS: usize = BLOCK_SZ * 8;
 /// 位图结构，用于管理块的分配和释放
+#[derive(Debug)]
 pub struct Bitmap {
     /// 位图起始块编号
     start_block_id: usize,
