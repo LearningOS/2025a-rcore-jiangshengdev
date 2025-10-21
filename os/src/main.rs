@@ -77,6 +77,12 @@ pub fn rust_main() -> ! {
     // 测试内存重映射功能是否正常工作
     mm::remap_test();
 
+    // // 临时验证块设备读写路径，确保新版 virtio 驱动正常
+    // drivers::block::block_device_test();
+    //
+    // // 执行内核态文件系统自检，验证 EasyFileSystem 读写路径
+    // fs::run_internal_fs_test();
+
     // 初始化陷阱处理机制，处理异常和中断
     trap::init();
     // 启用定时器中断，用于任务调度

@@ -50,6 +50,6 @@ impl StatMode {
     pub const NULL: StatMode = StatMode::empty();
 }
 
-pub use inode::{list_apps, open_file, OSInode, OpenFlags};
+pub use inode::{list_apps, open_file, run_internal_fs_test, OSInode, OpenFlags};
 pub use pipe::{make_pipe, Pipe};
 pub use stdio::{Stdin, Stdout};

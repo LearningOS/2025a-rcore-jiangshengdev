@@ -12,7 +12,8 @@ use alloc::sync::Arc;
 use alloc::vec;
 use alloc::vec::Vec;
 use bitflags::*;
-use easy_fs::{EasyFileSystem, Inode};
+use core::cmp::min;
+use easy_fs::{EasyFileSystem, Inode, BLOCK_SZ};
 use lazy_static::*;
 
 /// 内存中的 inode
@@ -42,9 +43,8 @@ impl OSInode {
     /// 从 inode 读取所有数据
     pub fn read_all(&self) -> Vec<u8> {
         let mut inner = self.inner.exclusive_access();
-        // 创建512字节的缓冲区用于分块读取
-        let mut buffer: Vec<u8> = vec![0; 512];
-        buffer.resize(512, 0);
+        // 创建与文件系统块大小一致的缓冲区用于分块读取
+        let mut buffer: Vec<u8> = vec![0; BLOCK_SZ];
         let mut v: Vec<u8> = Vec::new();
         // 循环读取文件的所有内容
         loop {
@@ -78,6 +78,43 @@ pub fn list_apps() {
         println!("{}", app);
     }
     println!("**************/");
+}
+
+/// 在内核态执行的 EasyFileSystem 自检，覆盖多块写入、偏移写入与清空逻辑
+pub fn run_internal_fs_test() {
+    println!("[kernel] Running internal fs smoke test");
+    const TEST_FILE: &str = "kernel-fs-selftest";
+    let inode = ROOT_INODE
+        .find(TEST_FILE)
+        .or_else(|| ROOT_INODE.create(TEST_FILE))
+        .expect("failed to prepare test file");
+
+    const TEST_LENGTHS: &[usize] = &[BLOCK_SZ / 2, BLOCK_SZ * 3, BLOCK_SZ * 5 + 211, BLOCK_SZ * 8];
+
+    for &len in TEST_LENGTHS {
+        inode.clear();
+        let mut baseline = build_pattern(len, 0x37);
+        assert_eq!(inode.write_at(0, baseline.as_slice()), baseline.len());
+
+        let read_back = read_full(&inode, len);
+        assert_eq!(read_back.as_slice(), baseline.as_slice());
+
+        if len > BLOCK_SZ {
+            let mid_offset = len / 3;
+            let patch_len = min(BLOCK_SZ / 2, len - mid_offset);
+            let patch = build_pattern(patch_len, 0xA5);
+            assert_eq!(inode.write_at(mid_offset, patch.as_slice()), patch.len());
+            baseline[mid_offset..mid_offset + patch_len].copy_from_slice(&patch);
+
+            let read_back = read_full(&inode, baseline.len());
+            assert_eq!(read_back.as_slice(), baseline.as_slice());
+        }
+    }
+
+    inode.clear();
+    let mut scratch = [0u8; 32];
+    assert_eq!(inode.read_at(0, &mut scratch), 0);
+    println!("[kernel] internal fs smoke test passed");
 }
 
 bitflags! {
@@ -178,4 +215,28 @@ impl File for OSInode {
         }
         total_write_size
     }
+}
+
+fn build_pattern(len: usize, seed: u8) -> Vec<u8> {
+    let mut data = Vec::with_capacity(len);
+    for i in 0..len {
+        data.push(seed.wrapping_add((i as u8).wrapping_mul(13))); // 简单的确定性模式
+    }
+    data
+}
+
+fn read_full(inode: &Arc<Inode>, expected_size: usize) -> Vec<u8> {
+    let mut collected = Vec::with_capacity(expected_size);
+    let mut offset = 0usize;
+    let mut buffer = [0u8; 256];
+    loop {
+        let read = inode.read_at(offset, &mut buffer);
+        if read == 0 {
+            break;
+        }
+        collected.extend_from_slice(&buffer[..read]);
+        offset += read;
+    }
+    assert_eq!(offset, expected_size);
+    collected
 }
