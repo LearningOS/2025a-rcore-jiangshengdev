@@ -4,6 +4,7 @@ use std::fs::{read_dir, File, OpenOptions};
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::sync::Arc;
 use std::sync::Mutex;
+use std::time::Instant;
 
 const BLOCK_SZ: usize = 512;
 
@@ -26,7 +27,11 @@ impl BlockDevice for BlockFile {
 }
 
 fn main() {
-    easy_fs_pack().expect("Error when packing easy-fs!");
+    let start = Instant::now();
+    let result = easy_fs_pack();
+    let elapsed = start.elapsed();
+    println!("easy_fs_pack took {:.3}s", elapsed.as_secs_f64());
+    result.expect("Error when packing easy-fs!");
 }
 
 fn easy_fs_pack() -> std::io::Result<()> {

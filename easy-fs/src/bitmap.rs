@@ -1,5 +1,6 @@
 use super::{get_block_cache, BlockDevice, BLOCK_SZ};
 use alloc::sync::Arc;
+use core::cell::Cell;
 use core::sync::atomic::{compiler_fence, Ordering};
 /// 位图块
 type BitmapBlock = [u64; 64];
@@ -12,6 +13,8 @@ pub struct Bitmap {
     start_block_id: usize,
     /// 位图占用的块数
     blocks: usize,
+    /// 分配游标（块级别），提升连续分配时的定位效率
+    cursor_block: Cell<usize>,
 }
 
 /// 将位分解为 (block_pos, bits64_pos, inner_pos)
@@ -43,6 +46,7 @@ impl Bitmap {
         Self {
             start_block_id,
             blocks,
+            cursor_block: Cell::new(0),
         }
     }
     /// 从块设备分配新块
@@ -53,8 +57,13 @@ impl Bitmap {
     /// # 返回
     /// 成功时返回分配的块编号，失败时返回None
     pub fn alloc(&self, block_device: &Arc<dyn BlockDevice>) -> Option<usize> {
+        if self.blocks == 0 {
+            return None;
+        }
+        let start = self.cursor_block.get() % self.blocks;
         // 遍历位图的每个块，寻找可用的位
-        for block_id in 0..self.blocks {
+        for offset in 0..self.blocks {
+            let block_id = (start + offset) % self.blocks;
             // 获取当前位图块的缓存
             let pos = get_block_cache(block_id + self.start_block_id, Arc::clone(block_device))
                 .lock()
@@ -86,8 +95,9 @@ impl Bitmap {
                     }
                 });
             // 如果在当前块中找到了可用位，直接返回
-            if pos.is_some() {
-                return pos;
+            if let Some(global_bit_index) = pos {
+                self.cursor_block.set(block_id);
+                return Some(global_bit_index);
             }
         }
         // 所有块都已满，分配失败
