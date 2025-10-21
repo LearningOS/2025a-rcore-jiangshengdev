@@ -3,7 +3,7 @@ use alloc::sync::Arc;
 use core::cell::Cell;
 use core::sync::atomic::{compiler_fence, Ordering};
 /// 位图块
-type BitmapBlock = [u64; 64];
+type BitmapBlock = [u64; BLOCK_SZ / 8];
 /// 一个块中的位数
 const BLOCK_BITS: usize = BLOCK_SZ * 8;
 /// 位图结构，用于管理块的分配和释放

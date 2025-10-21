@@ -8,9 +8,9 @@ use core::fmt;
 use spin::Mutex;
 
 /// 位图块管理的数据块容量
-const BITMAP_BLOCK_DATA_CAPACITY: u32 = 4096;
+const BITMAP_BLOCK_DATA_CAPACITY: u32 = (BLOCK_SZ * 8) as u32;
 /// 位图块总数（数据容量 + 自身）
-const BITMAP_BLOCK_TOTAL: u32 = 4097;
+const BITMAP_BLOCK_TOTAL: u32 = BITMAP_BLOCK_DATA_CAPACITY + 1;
 /// 基于块的简易文件系统，提供文件和目录的基本操作
 pub struct EasyFileSystem {
     /// 底层块设备引用

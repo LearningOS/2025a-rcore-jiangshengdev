@@ -105,7 +105,7 @@ fn format_size(bytes: usize) -> String {
     }
 }
 
-const BLOCK_SZ: usize = 512;
+const BLOCK_SZ: usize = 4096;
 
 struct BlockFile(Mutex<File>);
 
@@ -164,7 +164,7 @@ fn easy_fs_pack() -> std::io::Result<()> {
                 .write(true)
                 .create(true)
                 .open(format!("{}{}", target_path, "fs.img"))?;
-            f.set_len(160 * 2048 * 512).unwrap();
+            f.set_len(160u64 * 2048 * BLOCK_SZ as u64).unwrap();
             f
         })))
     };
@@ -231,7 +231,7 @@ fn efs_test() -> std::io::Result<()> {
             .write(true)
             .create(true)
             .open("target/fs.img")?;
-        f.set_len(8192 * 512).unwrap();
+        f.set_len(8192u64 * BLOCK_SZ as u64).unwrap();
         f
     })));
     EasyFileSystem::create(block_file.clone(), 4096, 1);
@@ -245,7 +245,7 @@ fn efs_test() -> std::io::Result<()> {
     let filea = root_inode.find("filea").unwrap();
     let greet_str = "Hello, world!";
     filea.write_at(0, greet_str.as_bytes());
-    //let mut buffer = [0u8; 512];
+    //let mut buffer = [0u8; BLOCK_SZ];
     let mut buffer = [0u8; 233];
     let len = filea.read_at(0, &mut buffer);
     assert_eq!(greet_str, core::str::from_utf8(&buffer[..len]).unwrap(),);

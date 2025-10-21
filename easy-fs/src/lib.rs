@@ -8,8 +8,8 @@ mod block_dev;
 mod efs;
 mod layout;
 mod vfs;
-/// 使用512字节的块大小
-pub const BLOCK_SZ: usize = 512;
+/// 使用4096字节的块大小
+pub const BLOCK_SZ: usize = 4096;
 use bitmap::Bitmap;
 use block_cache::{block_cache_sync_all, get_block_cache};
 pub use block_dev::BlockDevice;
