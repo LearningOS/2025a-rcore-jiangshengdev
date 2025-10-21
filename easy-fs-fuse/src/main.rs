@@ -6,6 +6,105 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use std::time::Instant;
 
+// 简单的计时器工具
+struct Timer {
+    name: Option<String>,
+    start: Instant,
+}
+
+impl Timer {
+    // 创建带名称的计时器，会在 drop 时自动打印
+    fn new(name: &str) -> Self {
+        Self {
+            name: Some(name.to_string()),
+            start: Instant::now(),
+        }
+    }
+
+    // 创建静默计时器，不会自动打印
+    fn silent() -> Self {
+        Self {
+            name: None,
+            start: Instant::now(),
+        }
+    }
+
+    fn elapsed_ms(&self) -> f64 {
+        self.start.elapsed().as_secs_f64() * 1000.0
+    }
+}
+
+impl Drop for Timer {
+    fn drop(&mut self) {
+        if let Some(name) = &self.name {
+            println!("[{}] {:.3}ms", name, self.elapsed_ms());
+        }
+    }
+}
+
+// 文件操作统计
+struct FileStats {
+    read_time: f64,
+    create_time: f64,
+    write_time: f64,
+    size: usize,
+}
+
+impl FileStats {
+    fn new() -> Self {
+        Self {
+            read_time: 0.0,
+            create_time: 0.0,
+            write_time: 0.0,
+            size: 0,
+        }
+    }
+
+    fn add(&mut self, other: &FileStats) {
+        self.read_time += other.read_time;
+        self.create_time += other.create_time;
+        self.write_time += other.write_time;
+        self.size += other.size;
+    }
+
+    fn print_line(&self, name: &str) {
+        println!(
+            "{:<30}\tR:{:>6.2}ms\tC:{:>6.2}ms\tW:{:>6.2}ms\t{:>10}",
+            name,
+            self.read_time,
+            self.create_time,
+            self.write_time,
+            format_size(self.size)
+        );
+    }
+
+    fn print_summary(&self) {
+        println!("\n=== Summary ===");
+        println!("Total size: {}", format_size(self.size));
+        println!("Read:   {:.3}ms", self.read_time);
+        println!("Create: {:.3}ms", self.create_time);
+        println!("Write:  {:.3}ms", self.write_time);
+    }
+}
+
+// 格式化文件大小为人类可读格式
+fn format_size(bytes: usize) -> String {
+    const KB: f64 = 1024.0;
+    const MB: f64 = KB * 1024.0;
+    const GB: f64 = MB * 1024.0;
+
+    let size = bytes as f64;
+    if size >= GB {
+        format!("{:.2} GB", size / GB)
+    } else if size >= MB {
+        format!("{:.2} MB", size / MB)
+    } else if size >= KB {
+        format!("{:.2} KB", size / KB)
+    } else {
+        format!("{} B", bytes)
+    }
+}
+
 const BLOCK_SZ: usize = 512;
 
 struct BlockFile(Mutex<File>);
@@ -35,6 +134,8 @@ fn main() {
 }
 
 fn easy_fs_pack() -> std::io::Result<()> {
+    let _total = Timer::new("Total");
+
     let matches = App::new("EasyFileSystem packer")
         .arg(
             Arg::with_name("source")
@@ -54,21 +155,27 @@ fn easy_fs_pack() -> std::io::Result<()> {
     let src_path = matches.value_of("source").unwrap();
     let target_path = matches.value_of("target").unwrap();
     println!("src_path = {}\ntarget_path = {}", src_path, target_path);
-    let block_file = Arc::new(BlockFile(Mutex::new({
-        let f = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create(true)
-            .open(format!("{}{}", target_path, "fs.img"))?;
-        f.set_len(160 * 2048 * 512).unwrap();
-        f
-    })));
-    // 160MiB, at most 4095 files
-    let efs = EasyFileSystem::create(block_file, 160 * 2048, 1);
 
-    println!("{:#?}", efs);
+    let block_file = {
+        let _timer = Timer::new("Create block file");
+        Arc::new(BlockFile(Mutex::new({
+            let f = OpenOptions::new()
+                .read(true)
+                .write(true)
+                .create(true)
+                .open(format!("{}{}", target_path, "fs.img"))?;
+            f.set_len(160 * 2048 * 512).unwrap();
+            f
+        })))
+    };
+
+    let efs = {
+        let _timer = Timer::new("Create filesystem");
+        EasyFileSystem::create(block_file, 160 * 2048, 1)
+    };
 
     let root_inode = Arc::new(EasyFileSystem::root_inode(&efs));
+
     let apps: Vec<_> = read_dir(src_path)
         .unwrap()
         .into_iter()
@@ -78,20 +185,41 @@ fn easy_fs_pack() -> std::io::Result<()> {
             name_with_ext
         })
         .collect();
+
+    println!("Found {} files", apps.len());
+
+    let mut total_stats = FileStats::new();
+
     for app in apps {
-        // load app data from host file system
+        let mut stats = FileStats::new();
+
+        // Read
+        let timer = Timer::silent();
         let mut host_file = File::open(format!("{}{}", target_path, app)).unwrap();
         let mut all_data: Vec<u8> = Vec::new();
         host_file.read_to_end(&mut all_data).unwrap();
-        // create a file in easy-fs
+        stats.read_time = timer.elapsed_ms();
+        stats.size = all_data.len();
+        drop(timer);
+
+        // Create
+        let timer = Timer::silent();
         let inode = root_inode.create(app.as_str()).unwrap();
-        // write data to easy-fs
+        stats.create_time = timer.elapsed_ms();
+        drop(timer);
+
+        // Write
+        let timer = Timer::silent();
         inode.write_at(0, all_data.as_slice());
+        stats.write_time = timer.elapsed_ms();
+        drop(timer);
+
+        stats.print_line(&app);
+        total_stats.add(&stats);
     }
-    // list apps
-    // for app in root_inode.ls() {
-    //     println!("{}", app);
-    // }
+
+    total_stats.print_summary();
+
     Ok(())
 }
 

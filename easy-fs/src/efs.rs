@@ -105,15 +105,15 @@ impl EasyFileSystem {
             inode_area_start_block: 1 + inode_bitmap_blocks,
             data_area_start_block,
         };
-        // 初始化所有块，将其内容清零
-        for i in 0..total_blocks {
+        // 只初始化元数据区域的块（超级块、位图、inode区）
+        // 数据区的块在实际分配时再清零，避免不必要的初始化
+        let metadata_blocks = 1 + inode_total_blocks + data_bitmap_blocks;
+        for i in 0..metadata_blocks {
             get_block_cache(i as usize, Arc::clone(&block_device))
                 .lock()
                 .modify(0, |data_block: &mut DataBlock| {
-                    // 将块中的每个字节都设置为0
-                    for byte in data_block.iter_mut() {
-                        *byte = 0;
-                    }
+                    // 使用 fill 方法批量清零，比逐字节赋值快得多
+                    data_block.fill(0);
                 });
         }
         // 初始化超级块
@@ -241,7 +241,14 @@ impl EasyFileSystem {
         // 从数据位图分配一个数据块
         let data_block_id = self.data_bitmap.alloc(&self.block_device).unwrap() as u32;
         // 转换为实际的磁盘块编号
-        data_block_id + self.data_area_start_block
+        let block_id = data_block_id + self.data_area_start_block;
+        // 清零新分配的数据块（延迟初始化策略）
+        get_block_cache(block_id as usize, Arc::clone(&self.block_device))
+            .lock()
+            .modify(0, |data_block: &mut DataBlock| {
+                data_block.fill(0);
+            });
+        block_id
     }
     /// 释放指定的数据块
     ///
@@ -252,10 +259,8 @@ impl EasyFileSystem {
         get_block_cache(block_id as usize, Arc::clone(&self.block_device))
             .lock()
             .modify(0, |data_block: &mut DataBlock| {
-                // 将数据块中的每个字节都设置为0
-                data_block.iter_mut().for_each(|p| {
-                    *p = 0;
-                })
+                // 使用 fill 方法批量清零，比逐字节赋值快得多
+                data_block.fill(0);
             });
         // 计算数据块在位图中的索引
         let data_block_index = (block_id - self.data_area_start_block) as usize;
