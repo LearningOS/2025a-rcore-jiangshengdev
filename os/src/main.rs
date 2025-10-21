@@ -86,8 +86,10 @@ pub fn rust_main() -> ! {
 
     // 列出可用的应用程序
     fs::list_apps();
+    println!("[kernel] Finished listing apps, preparing to add initproc");
     // 添加初始进程到任务队列
     task::add_initproc();
+    println!("[kernel] Added initproc, entering scheduler");
     // 开始运行任务调度器，进入多任务环境
     task::run_tasks();
     panic!("Unreachable in rust_main!");

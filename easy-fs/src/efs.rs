@@ -86,9 +86,9 @@ impl EasyFileSystem {
         let inode_total_blocks = inode_bitmap_blocks + inode_area_blocks;
         // 数据相关区域的总块数 = 总块数 - 超级块(1) - inode相关块数
         let data_total_blocks = total_blocks - 1 - inode_total_blocks;
-    // 计算数据位图需要的块数
-    // 每个位图块可以管理 BITMAP_BLOCK_DATA_CAPACITY 个数据块，因此
-    // 需要 (data_total_blocks + BITMAP_BLOCK_DATA_CAPACITY) / BITMAP_BLOCK_TOTAL 个位图块
+        // 计算数据位图需要的块数
+        // 每个位图块可以管理 BITMAP_BLOCK_DATA_CAPACITY 个数据块，因此
+        // 需要 (data_total_blocks + BITMAP_BLOCK_DATA_CAPACITY) / BITMAP_BLOCK_TOTAL 个位图块
         let data_bitmap_blocks =
             (data_total_blocks + BITMAP_BLOCK_DATA_CAPACITY) / BITMAP_BLOCK_TOTAL;
         // 实际可用的数据块数 = 数据总块数 - 数据位图块数
