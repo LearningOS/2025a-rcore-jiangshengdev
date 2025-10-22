@@ -1,13 +1,15 @@
 use super::{BlockDevice, BLOCK_SZ};
 use alloc::collections::VecDeque;
 use alloc::sync::Arc;
+use alloc::vec;
+use alloc::vec::Vec;
 use core::sync::atomic::{compiler_fence, Ordering};
 use lazy_static::*;
 use spin::Mutex;
 /// 内存中的缓存块，用于缓存磁盘块数据以提高访问性能
 pub struct BlockCache {
     /// 缓存的块数据，大小为BLOCK_SZ字节
-    cache: [u8; BLOCK_SZ],
+    cache: Vec<u8>,
     /// 对应的磁盘块编号
     block_id: usize,
     /// 底层块设备的引用
@@ -27,7 +29,7 @@ impl BlockCache {
     /// 新创建的块缓存实例
     pub fn new(block_id: usize, block_device: Arc<dyn BlockDevice>) -> Self {
         // 创建空的缓存数组
-        let mut cache = [0u8; BLOCK_SZ];
+        let mut cache = vec![0u8; BLOCK_SZ];
         // 从块设备读取数据到缓存
         block_device.read_block(block_id, &mut cache);
         // 创建新的块缓存实例，初始状态为未修改
