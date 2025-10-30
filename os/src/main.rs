@@ -46,20 +46,20 @@ pub mod trap;
 use core::arch::global_asm;
 
 global_asm!(include_str!("entry.asm"));
-/// 清空 BSS 段
+/// 清空 BSS 段 - 优化版本
 fn clear_bss() {
-    // 声明外部符号，这些符号由链接器脚本定义
-    // sbss: BSS段的起始地址
-    // ebss: BSS段的结束地址
     extern "C" {
         fn sbss();
         fn ebss();
     }
-    // 使用unsafe代码将BSS段内存区域清零
-    // 这是必要的，因为BSS段包含未初始化的全局变量，需要被初始化为0
+
     unsafe {
-        core::slice::from_raw_parts_mut(sbss as usize as *mut u8, ebss as usize - sbss as usize)
-            .fill(0);
+        let start = sbss as usize as *mut u8;
+        let end = ebss as usize as *mut u8;
+        let size = end as usize - start as usize;
+
+        // 使用 write_bytes 进行高效的批量清零
+        core::ptr::write_bytes(start, 0, size);
     }
 }
 
