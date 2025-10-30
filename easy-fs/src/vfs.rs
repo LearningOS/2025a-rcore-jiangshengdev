@@ -5,7 +5,7 @@ use super::{
 use alloc::string::String;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
-use spin::Mutex;
+use spin::{Mutex, MutexGuard};
 /// Virtual filesystem layer over easy-fs
 pub struct Inode {
     block_id: usize,
@@ -45,14 +45,14 @@ impl Inode {
     /// 在持有可写文件系统锁的情况下修改磁盘 inode
     fn modify_disk_inode_with_fs<V>(
         &self,
-        f: impl FnOnce(&mut DiskInode, &mut EasyFileSystem) -> V,
+        f: impl FnOnce(&mut DiskInode, &mut MutexGuard<EasyFileSystem>) -> V,
     ) -> V {
         // 获取文件系统互斥锁以进行修改
         let mut fs = self.fs.lock();
         get_block_cache(self.block_id, Arc::clone(&self.block_device))
             .lock()
             .modify(self.block_offset, |disk_inode: &mut DiskInode| {
-                // 将磁盘 inode 可变引用与文件系统一起传入回调
+                // 将磁盘 inode 可变引用与文件系统 MutexGuard 一起传入回调
                 f(disk_inode, &mut fs)
             })
     }
@@ -90,7 +90,12 @@ impl Inode {
         })
     }
     /// Increase the size of a disk inode
-    fn increase_size(&self, new_size: u32, disk_inode: &mut DiskInode, fs: &mut EasyFileSystem) {
+    fn increase_size(
+        &self,
+        new_size: u32,
+        disk_inode: &mut DiskInode,
+        fs: &mut MutexGuard<EasyFileSystem>,
+    ) {
         if new_size < disk_inode.size {
             return;
         }
