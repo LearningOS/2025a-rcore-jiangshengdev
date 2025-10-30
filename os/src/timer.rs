@@ -31,5 +31,6 @@ pub fn get_time_us() -> usize {
 /// 设置下一次定时器中断
 pub fn set_next_trigger() {
     // 设置定时器在当前时间加上一个时间片后触发中断
-    set_timer(get_time() + CLOCK_FREQ / TICKS_PER_SEC);
+    let next_time = (get_time() + CLOCK_FREQ / TICKS_PER_SEC) as u64;
+    let _ = set_timer(next_time);
 }

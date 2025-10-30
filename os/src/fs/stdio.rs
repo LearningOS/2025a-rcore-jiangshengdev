@@ -1,8 +1,42 @@
-//! 标准输入和标准输出
+//! 标准输入和标准输出 - 使用现代DBCN接口
 use super::File;
 use crate::mm::UserBuffer;
-use crate::sbi::console_getchar;
+use crate::sbi::{console_read, console_write, console_write_byte};
 use crate::task::suspend_current_and_run_next;
+
+/// 写入缓冲区，失败时回退到逐字节写入
+fn write_buffer_with_fallback(buffer: &[u8]) -> usize {
+    let ret = console_write(buffer);
+    let written = ret.value_or_zero();
+
+    if written > 0 {
+        written
+    } else {
+        // 批量写入失败，回退到逐字节写入
+        buffer.iter().for_each(|&byte| {
+            let _ = console_write_byte(byte);
+        });
+        buffer.len()
+    }
+}
+
+/// 从控制台读取单个字符，阻塞直到有输入
+fn read_char_blocking() -> u8 {
+    loop {
+        let mut kernel_buf = [0u8; 1];
+        let ret = console_read(&mut kernel_buf);
+
+        if ret.is_ok() && ret.value > 0 {
+            return kernel_buf[0];
+        } else {
+            // 没有字符可读，使用WFI降低CPU占用并切换任务
+            unsafe {
+                core::arch::asm!("wfi", options(nomem, nostack));
+            }
+            suspend_current_and_run_next();
+        }
+    }
+}
 
 /// 从控制台获取字符的标准输入文件
 pub struct Stdin;
@@ -19,20 +53,8 @@ impl File for Stdin {
     }
     fn read(&self, mut user_buf: UserBuffer) -> usize {
         assert_eq!(user_buf.len(), 1);
-        // 从控制台读取一个字符
-        let mut c: usize;
-        loop {
-            c = console_getchar();
-            if c == 0 {
-                // 没有字符可读，暂停当前任务等待输入
-                suspend_current_and_run_next();
-                continue;
-            } else {
-                break;
-            }
-        }
-        let ch = c as u8;
-        // 将读取的字符写入用户缓冲区
+
+        let ch = read_char_blocking();
         unsafe {
             user_buf.buffers[0].as_mut_ptr().write_volatile(ch);
         }
@@ -54,10 +76,10 @@ impl File for Stdout {
         panic!("Cannot read from stdout!");
     }
     fn write(&self, user_buf: UserBuffer) -> usize {
-        // 遍历用户缓冲区的所有片段并输出到控制台
-        for buffer in user_buf.buffers.iter() {
-            print!("{}", core::str::from_utf8(buffer).unwrap());
-        }
-        user_buf.len()
+        user_buf
+            .buffers
+            .iter()
+            .map(|buffer| write_buffer_with_fallback(buffer))
+            .sum()
     }
 }

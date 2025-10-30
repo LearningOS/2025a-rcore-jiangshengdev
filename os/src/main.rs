@@ -119,8 +119,6 @@ pub fn rust_main() -> ! {
         fs::list_apps();
     });
 
-    println!("[kernel] Finished listing apps, preparing to add initproc");
-
     // 测量初始进程添加时间
     time_it!("task_initproc", {
         task::add_initproc();
