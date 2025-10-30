@@ -138,8 +138,8 @@ impl Drop for BlockCache {
         self.sync()
     }
 }
-/// 使用16个块的块缓存
-const BLOCK_CACHE_SIZE: usize = 16;
+/// 使用64个块的块缓存
+const BLOCK_CACHE_SIZE: usize = 64;
 
 /// 块缓存管理器，使用LRU策略管理多个块缓存
 pub struct BlockCacheManager {
