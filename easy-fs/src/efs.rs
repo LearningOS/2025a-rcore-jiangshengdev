@@ -112,8 +112,10 @@ impl EasyFileSystem {
             get_block_cache(i as usize, Arc::clone(&block_device))
                 .lock()
                 .modify(0, |data_block: &mut DataBlock| {
-                    // 使用 fill 方法批量清零，比逐字节赋值快得多
-                    data_block.fill(0);
+                    // 使用 write_bytes 进行高效的批量清零
+                    unsafe {
+                        core::ptr::write_bytes(data_block.as_mut_ptr(), 0, BLOCK_SZ);
+                    }
                 });
         }
         // 初始化超级块
@@ -246,7 +248,10 @@ impl EasyFileSystem {
         get_block_cache(block_id as usize, Arc::clone(&self.block_device))
             .lock()
             .modify(0, |data_block: &mut DataBlock| {
-                data_block.fill(0);
+                // 使用 write_bytes 进行高效的批量清零
+                unsafe {
+                    core::ptr::write_bytes(data_block.as_mut_ptr(), 0, BLOCK_SZ);
+                }
             });
         block_id
     }
@@ -259,8 +264,10 @@ impl EasyFileSystem {
         get_block_cache(block_id as usize, Arc::clone(&self.block_device))
             .lock()
             .modify(0, |data_block: &mut DataBlock| {
-                // 使用 fill 方法批量清零，比逐字节赋值快得多
-                data_block.fill(0);
+                // 使用 write_bytes 进行高效的批量清零
+                unsafe {
+                    core::ptr::write_bytes(data_block.as_mut_ptr(), 0, BLOCK_SZ);
+                }
             });
         // 计算数据块在位图中的索引
         let data_block_index = (block_id - self.data_area_start_block) as usize;
