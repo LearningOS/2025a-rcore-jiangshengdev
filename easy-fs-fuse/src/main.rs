@@ -6,6 +6,9 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use std::time::Instant;
 
+mod profiler;
+use profiler::PackingProfiler;
+
 // 简单的计时器工具
 struct Timer {
     name: Option<String>,
@@ -13,14 +16,6 @@ struct Timer {
 }
 
 impl Timer {
-    // 创建带名称的计时器，会在 drop 时自动打印
-    fn new(name: &str) -> Self {
-        Self {
-            name: Some(name.to_string()),
-            start: Instant::now(),
-        }
-    }
-
     // 创建静默计时器，不会自动打印
     fn silent() -> Self {
         Self {
@@ -134,7 +129,10 @@ fn main() {
 }
 
 fn easy_fs_pack() -> std::io::Result<()> {
-    let _total = Timer::new("Total");
+    let mut profiler = PackingProfiler::new();
+
+    // 开始总体计时
+    profiler.start_timing("total_packing");
 
     let matches = App::new("EasyFileSystem packer")
         .arg(
@@ -156,8 +154,7 @@ fn easy_fs_pack() -> std::io::Result<()> {
     let target_path = matches.value_of("target").unwrap();
     println!("src_path = {}\ntarget_path = {}", src_path, target_path);
 
-    let block_file = {
-        let _timer = Timer::new("Create block file");
+    let block_file = pack_time_it!(profiler, "create_block_file", {
         Arc::new(BlockFile(Mutex::new({
             let f = OpenOptions::new()
                 .read(true)
@@ -167,57 +164,66 @@ fn easy_fs_pack() -> std::io::Result<()> {
             f.set_len(160u64 * 2048 * BLOCK_SZ as u64).unwrap();
             f
         })))
-    };
+    });
 
-    let efs = {
-        let _timer = Timer::new("Create filesystem");
+    let efs = pack_time_it!(profiler, "create_filesystem", {
         EasyFileSystem::create(block_file, 160 * 2048, 1)
-    };
+    });
 
     let root_inode = Arc::new(EasyFileSystem::root_inode(&efs));
 
-    let apps: Vec<_> = read_dir(src_path)
-        .unwrap()
-        .into_iter()
-        .map(|dir_entry| {
-            let mut name_with_ext = dir_entry.unwrap().file_name().into_string().unwrap();
-            name_with_ext.drain(name_with_ext.find('.').unwrap()..name_with_ext.len());
-            name_with_ext
-        })
-        .collect();
+    let apps: Vec<_> = pack_time_it!(profiler, "file_discovery", {
+        read_dir(src_path)
+            .unwrap()
+            .into_iter()
+            .map(|dir_entry| {
+                let mut name_with_ext = dir_entry.unwrap().file_name().into_string().unwrap();
+                name_with_ext.drain(name_with_ext.find('.').unwrap()..name_with_ext.len());
+                name_with_ext
+            })
+            .collect()
+    });
 
     println!("Found {} files", apps.len());
 
     let mut total_stats = FileStats::new();
 
-    for app in apps {
-        let mut stats = FileStats::new();
+    // 文件处理循环
+    pack_time_it!(profiler, "file_processing", {
+        for app in apps {
+            let mut stats = FileStats::new();
 
-        // Read
-        let timer = Timer::silent();
-        let mut host_file = File::open(format!("{}{}", target_path, app)).unwrap();
-        let mut all_data: Vec<u8> = Vec::new();
-        host_file.read_to_end(&mut all_data).unwrap();
-        stats.read_time = timer.elapsed_ms();
-        stats.size = all_data.len();
-        drop(timer);
+            // Read
+            let timer = Timer::silent();
+            let mut host_file = File::open(format!("{}{}", target_path, app)).unwrap();
+            let mut all_data: Vec<u8> = Vec::new();
+            host_file.read_to_end(&mut all_data).unwrap();
+            stats.read_time = timer.elapsed_ms();
+            stats.size = all_data.len();
+            drop(timer);
 
-        // Create
-        let timer = Timer::silent();
-        let inode = root_inode.create(app.as_str()).unwrap();
-        stats.create_time = timer.elapsed_ms();
-        drop(timer);
+            // Create
+            let timer = Timer::silent();
+            let inode = root_inode.create(app.as_str()).unwrap();
+            stats.create_time = timer.elapsed_ms();
+            drop(timer);
 
-        // Write
-        let timer = Timer::silent();
-        inode.write_at(0, all_data.as_slice());
-        stats.write_time = timer.elapsed_ms();
-        drop(timer);
+            // Write
+            let timer = Timer::silent();
+            inode.write_at(0, all_data.as_slice());
+            stats.write_time = timer.elapsed_ms();
+            drop(timer);
 
-        stats.print_line(&app);
-        total_stats.add(&stats);
-    }
+            stats.print_line(&app);
+            total_stats.add(&stats);
+        }
+    });
 
+    // 结束总体计时
+    profiler.end_timing("total_packing");
+
+    // 输出性能报告
+    profiler.print_timing_results();
     total_stats.print_summary();
 
     Ok(())
