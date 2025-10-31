@@ -104,10 +104,7 @@ pub fn sys_mmap(start: usize, len: usize, prot: usize) -> isize {
     if start.checked_add(len_aligned).is_none() {
         return -1;
     }
-    match mmap_current(start, len_aligned, perm) {
-        Ok(()) => 0,
-        Err(()) => -1,
-    }
+    mmap_current(start, len_aligned, perm).map_or(-1, |_| 0)
 }
 
 // YOUR JOB: Implement munmap.
@@ -125,10 +122,7 @@ pub fn sys_munmap(start: usize, len: usize) -> isize {
     if start.checked_add(len).is_none() {
         return -1;
     }
-    match munmap_current(start, len) {
-        Ok(()) => 0,
-        Err(()) => -1,
-    }
+    munmap_current(start, len).map_or(-1, |_| 0)
 }
 /// change data segment size
 pub fn sys_sbrk(size: i32) -> isize {

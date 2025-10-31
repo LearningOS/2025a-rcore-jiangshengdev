@@ -33,6 +33,25 @@ lazy_static! {
     pub static ref KERNEL_SPACE: Arc<UPSafeCell<MemorySet>> =
         Arc::new(unsafe { UPSafeCell::new(MemorySet::new_kernel()) });
 }
+
+/// Errors that can occur while manipulating [`MemorySet`] mappings.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MapError {
+    /// The requested range is empty or inverted.
+    InvalidRange,
+    /// The requested range overlaps an existing mapping.
+    AlreadyMapped,
+    /// Failed to allocate a required physical frame.
+    OutOfMemory,
+    /// The provided area index does not exist.
+    InvalidAreaIndex,
+    /// The provided range does not match the tracked map area.
+    RangeMismatch,
+    /// Virtual address addition overflowed.
+    AddressOverflow,
+    /// No mmap region matched the request.
+    RegionNotFound,
+}
 /// address space
 pub struct MemorySet {
     page_table: PageTable,
@@ -70,9 +89,9 @@ impl MemorySet {
         start_va: VirtAddr,
         end_va: VirtAddr,
         permission: MapPermission,
-    ) -> Result<usize, ()> {
+    ) -> Result<usize, MapError> {
         if start_va >= end_va {
-            return Err(());
+            return Err(MapError::InvalidRange);
         }
         let start_vpn = start_va.floor();
         let end_vpn = end_va.ceil();
@@ -83,7 +102,7 @@ impl MemorySet {
                 .map(|pte| pte.is_valid())
                 .unwrap_or(false)
             {
-                return Err(());
+                return Err(MapError::AlreadyMapped);
             }
         }
         let mut map_area = MapArea::new(start_va, end_va, MapType::Framed, permission);
@@ -94,7 +113,7 @@ impl MemorySet {
                     for rollback_vpn in VPNRange::new(start_vpn, vpn) {
                         map_area.unmap_one(&mut self.page_table, rollback_vpn);
                     }
-                    return Err(());
+                    return Err(MapError::OutOfMemory);
                 }
             };
             let ppn = frame.ppn;
@@ -113,21 +132,21 @@ impl MemorySet {
         start_va: VirtAddr,
         end_va: VirtAddr,
         area_index: usize,
-    ) -> Result<(), ()> {
+    ) -> Result<(), MapError> {
         if start_va >= end_va {
             return Ok(());
         }
         let start_vpn = start_va.floor();
         let end_vpn = end_va.ceil();
         if area_index >= self.areas.len() {
-            return Err(());
+            return Err(MapError::InvalidAreaIndex);
         }
         let range_matches = {
             let area = &self.areas[area_index];
             area.vpn_range.get_start() == start_vpn && area.vpn_range.get_end() == end_vpn
         };
         if !range_matches {
-            return Err(());
+            return Err(MapError::RangeMismatch);
         }
         let mut area = self.areas.remove(area_index);
         area.unmap(&mut self.page_table);

@@ -18,7 +18,7 @@ use crate::sync::UPSafeCell;
 use crate::trap::TrapContext;
 use crate::{
     loader::{get_app_data, get_num_app},
-    mm::MapPermission,
+    mm::{MapError, MapPermission},
 };
 use alloc::vec::Vec;
 use lazy_static::*;
@@ -151,14 +151,14 @@ impl TaskManager {
     }
 
     /// Map a new anonymous memory region for the current task.
-    fn mmap_current(&self, start: usize, len: usize, perm: MapPermission) -> Result<(), ()> {
+    fn mmap_current(&self, start: usize, len: usize, perm: MapPermission) -> Result<(), MapError> {
         let mut inner = self.inner.exclusive_access();
         let current = inner.current_task;
         inner.tasks[current].mmap(start, len, perm)
     }
 
     /// Unmap a previously created anonymous memory region for the current task.
-    fn munmap_current(&self, start: usize, len: usize) -> Result<(), ()> {
+    fn munmap_current(&self, start: usize, len: usize) -> Result<(), MapError> {
         let mut inner = self.inner.exclusive_access();
         let current = inner.current_task;
         inner.tasks[current].munmap(start, len)
@@ -245,11 +245,11 @@ pub fn change_program_brk(size: i32) -> Option<usize> {
 }
 
 /// Map a new anonymous memory region for the current running task.
-pub fn mmap_current(start: usize, len: usize, perm: MapPermission) -> Result<(), ()> {
+pub fn mmap_current(start: usize, len: usize, perm: MapPermission) -> Result<(), MapError> {
     TASK_MANAGER.mmap_current(start, len, perm)
 }
 
 /// Unmap a previously created anonymous memory region for the current running task.
-pub fn munmap_current(start: usize, len: usize) -> Result<(), ()> {
+pub fn munmap_current(start: usize, len: usize) -> Result<(), MapError> {
     TASK_MANAGER.munmap_current(start, len)
 }
