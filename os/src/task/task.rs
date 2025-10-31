@@ -5,6 +5,7 @@ use crate::mm::{
     kernel_stack_position, MapPermission, MemorySet, PhysPageNum, VirtAddr, KERNEL_SPACE,
 };
 use crate::trap::{trap_handler, TrapContext};
+use alloc::vec::Vec;
 
 /// The task control block (TCB) of a task.
 pub struct TaskControlBlock {
@@ -31,6 +32,15 @@ pub struct TaskControlBlock {
 
     /// Per-syscall invocation counters
     syscall_counts: [usize; MAX_SYSCALL_NUM],
+
+    /// Regions created via mmap
+    mmap_regions: Vec<MMapRegion>,
+}
+
+/// Metadata of a single mmap region
+struct MMapRegion {
+    start: usize,
+    len: usize,
 }
 
 impl TaskControlBlock {
@@ -67,6 +77,7 @@ impl TaskControlBlock {
             heap_bottom: user_sp,
             program_brk: user_sp,
             syscall_counts: [0; MAX_SYSCALL_NUM],
+            mmap_regions: Vec::new(),
         };
         // prepare TrapContext in user space
         let trap_cx = task_control_block.get_trap_cx();
@@ -114,6 +125,50 @@ impl TaskControlBlock {
             Some(self.syscall_counts[syscall_id])
         } else {
             None
+        }
+    }
+
+    /// Map a new anonymous memory region for the task.
+    pub fn mmap(&mut self, start: usize, len: usize, perm: MapPermission) -> Result<(), ()> {
+        if len == 0 {
+            return Ok(());
+        }
+        let end = start.checked_add(len).ok_or(())?;
+        let start_va = VirtAddr::from(start);
+        let end_va = VirtAddr::from(end);
+        if self
+            .memory_set
+            .mmap(start_va, end_va, perm | MapPermission::U)
+            .is_ok()
+        {
+            self.mmap_regions.push(MMapRegion { start, len });
+            Ok(())
+        } else {
+            Err(())
+        }
+    }
+
+    /// Unmap a previously mapped anonymous memory region.
+    pub fn munmap(&mut self, start: usize, len: usize) -> Result<(), ()> {
+        if len == 0 {
+            return Ok(());
+        }
+        let end = start.checked_add(len).ok_or(())?;
+        if let Some(idx) = self
+            .mmap_regions
+            .iter()
+            .position(|region| region.start == start && region.len == len)
+        {
+            let start_va = VirtAddr::from(start);
+            let end_va = VirtAddr::from(end);
+            if self.memory_set.munmap(start_va, end_va).is_ok() {
+                self.mmap_regions.swap_remove(idx);
+                Ok(())
+            } else {
+                Err(())
+            }
+        } else {
+            Err(())
         }
     }
 }

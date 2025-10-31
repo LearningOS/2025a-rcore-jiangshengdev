@@ -1,10 +1,10 @@
 //! Process management syscalls
 use crate::{
     config::PAGE_SIZE,
-    mm::{PageTable, PTEFlags, VirtAddr},
+    mm::{MapPermission, PageTable, PTEFlags, VirtAddr},
     task::{
         change_program_brk, current_syscall_count, current_user_token, exit_current_and_run_next,
-        suspend_current_and_run_next,
+        mmap_current, munmap_current, suspend_current_and_run_next,
     },
     timer::get_time_us,
 };
@@ -83,15 +83,48 @@ pub fn sys_trace(trace_request: usize, id: usize, data: usize) -> isize {
 }
 
 // YOUR JOB: Implement mmap.
-pub fn sys_mmap(_start: usize, _len: usize, _port: usize) -> isize {
-    trace!("kernel: sys_mmap NOT IMPLEMENTED YET!");
-    -1
+pub fn sys_mmap(start: usize, len: usize, prot: usize) -> isize {
+    trace!("kernel: sys_mmap");
+    if !is_page_aligned(start) {
+        return -1;
+    }
+    let Some(len_aligned) = align_len(len) else {
+        return -1;
+    };
+    let Some(perm) = prot_to_perm(prot) else {
+        return -1;
+    };
+    if len_aligned == 0 {
+        return 0;
+    }
+    if start.checked_add(len_aligned).is_none() {
+        return -1;
+    }
+    match mmap_current(start, len_aligned, perm) {
+        Ok(()) => 0,
+        Err(()) => -1,
+    }
 }
 
 // YOUR JOB: Implement munmap.
-pub fn sys_munmap(_start: usize, _len: usize) -> isize {
-    trace!("kernel: sys_munmap NOT IMPLEMENTED YET!");
-    -1
+pub fn sys_munmap(start: usize, len: usize) -> isize {
+    trace!("kernel: sys_munmap");
+    if !is_page_aligned(start) {
+        return -1;
+    }
+    if len == 0 {
+        return 0;
+    }
+    if len % PAGE_SIZE != 0 {
+        return -1;
+    }
+    if start.checked_add(len).is_none() {
+        return -1;
+    }
+    match munmap_current(start, len) {
+        Ok(()) => 0,
+        Err(()) => -1,
+    }
 }
 /// change data segment size
 pub fn sys_sbrk(size: i32) -> isize {
@@ -157,4 +190,37 @@ fn write_user_bytes(token: usize, mut ptr: usize, buf: &[u8]) -> bool {
         ptr += len;
     }
     true
+}
+
+fn is_page_aligned(addr: usize) -> bool {
+    addr % PAGE_SIZE == 0
+}
+
+fn align_len(len: usize) -> Option<usize> {
+    if len == 0 {
+        Some(0)
+    } else {
+        let pages = ((len - 1) / PAGE_SIZE).checked_add(1)?;
+        pages.checked_mul(PAGE_SIZE)
+    }
+}
+
+fn prot_to_perm(prot: usize) -> Option<MapPermission> {
+    if prot & !0x7 != 0 {
+        return None;
+    }
+    if prot & 0x7 == 0 {
+        return None;
+    }
+    let mut perm = MapPermission::empty();
+    if prot & 0x1 != 0 {
+        perm |= MapPermission::R;
+    }
+    if prot & 0x2 != 0 {
+        perm |= MapPermission::W;
+    }
+    if prot & 0x4 != 0 {
+        perm |= MapPermission::X;
+    }
+    Some(perm)
 }

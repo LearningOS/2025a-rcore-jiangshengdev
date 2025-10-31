@@ -14,7 +14,10 @@ mod switch;
 #[allow(clippy::module_inception)]
 mod task;
 
-use crate::loader::{get_app_data, get_num_app};
+use crate::{
+    loader::{get_app_data, get_num_app},
+    mm::MapPermission,
+};
 use crate::sync::UPSafeCell;
 use crate::trap::TrapContext;
 use alloc::vec::Vec;
@@ -147,6 +150,20 @@ impl TaskManager {
         inner.tasks[cur].change_program_brk(size)
     }
 
+    /// Map a new anonymous memory region for the current task.
+    fn mmap_current(&self, start: usize, len: usize, perm: MapPermission) -> Result<(), ()> {
+        let mut inner = self.inner.exclusive_access();
+        let current = inner.current_task;
+        inner.tasks[current].mmap(start, len, perm)
+    }
+
+    /// Unmap a previously created anonymous memory region for the current task.
+    fn munmap_current(&self, start: usize, len: usize) -> Result<(), ()> {
+        let mut inner = self.inner.exclusive_access();
+        let current = inner.current_task;
+        inner.tasks[current].munmap(start, len)
+    }
+
     /// Switch current `Running` task to the task we have found,
     /// or there is no `Ready` task and we can exit with all applications completed
     fn run_next_task(&self) {
@@ -225,4 +242,14 @@ pub fn current_syscall_count(syscall_id: usize) -> Option<usize> {
 /// Change the current 'Running' task's program break
 pub fn change_program_brk(size: i32) -> Option<usize> {
     TASK_MANAGER.change_current_program_brk(size)
+}
+
+/// Map a new anonymous memory region for the current running task.
+pub fn mmap_current(start: usize, len: usize, perm: MapPermission) -> Result<(), ()> {
+    TASK_MANAGER.mmap_current(start, len, perm)
+}
+
+/// Unmap a previously created anonymous memory region for the current running task.
+pub fn munmap_current(start: usize, len: usize) -> Result<(), ()> {
+    TASK_MANAGER.munmap_current(start, len)
 }
