@@ -141,12 +141,14 @@ impl DiskInode {
     }
 
     /// 将硬链接计数直接设为指定值
+    #[allow(dead_code)]
     pub fn set_nlink(&mut self, nlink: u32) {
         // 覆盖记录的硬链接计数
         self.nlink = nlink;
     }
 
     /// 显式调整磁盘 inode 的类型
+    #[allow(dead_code)]
     pub fn set_type(&mut self, type_: DiskInodeType) {
         self.type_ = type_;
     }
