@@ -14,7 +14,7 @@ mod switch;
 #[allow(clippy::module_inception)]
 mod task;
 
-use crate::config::MAX_APP_NUM;
+use crate::config::{MAX_APP_NUM, MAX_SYSCALL_NUM};
 use crate::loader::{get_num_app, init_app_cx};
 use crate::sync::UPSafeCell;
 use lazy_static::*;
@@ -45,6 +45,8 @@ pub struct TaskManagerInner {
     tasks: [TaskControlBlock; MAX_APP_NUM],
     /// id of current `Running` task
     current_task: usize,
+    /// syscall invocation counters per task
+    syscall_counts: [[usize; MAX_SYSCALL_NUM]; MAX_APP_NUM],
 }
 
 lazy_static! {
@@ -65,6 +67,7 @@ lazy_static! {
                 UPSafeCell::new(TaskManagerInner {
                     tasks,
                     current_task: 0,
+                    syscall_counts: [[0; MAX_SYSCALL_NUM]; MAX_APP_NUM],
                 })
             },
         }
@@ -135,6 +138,26 @@ impl TaskManager {
             panic!("All applications completed!");
         }
     }
+
+    /// Record a syscall invocation for the current running task.
+    fn record_syscall(&self, syscall_id: usize) {
+        if syscall_id >= MAX_SYSCALL_NUM {
+            return;
+        }
+        let mut inner = self.inner.exclusive_access();
+        let current = inner.current_task;
+        inner.syscall_counts[current][syscall_id] += 1;
+    }
+
+    /// Query syscall invocation count for the current running task.
+    fn current_syscall_count(&self, syscall_id: usize) -> Option<usize> {
+        if syscall_id >= MAX_SYSCALL_NUM {
+            return None;
+        }
+        let inner = self.inner.exclusive_access();
+        let current = inner.current_task;
+        Some(inner.syscall_counts[current][syscall_id])
+    }
 }
 
 /// Run the first task in task list.
@@ -168,4 +191,14 @@ pub fn suspend_current_and_run_next() {
 pub fn exit_current_and_run_next() {
     mark_current_exited();
     run_next_task();
+}
+
+/// Record a syscall invocation for the current running task.
+pub fn record_syscall(syscall_id: usize) {
+    TASK_MANAGER.record_syscall(syscall_id);
+}
+
+/// Get the syscall invocation count for the current running task.
+pub fn current_syscall_count(syscall_id: usize) -> Option<usize> {
+    TASK_MANAGER.current_syscall_count(syscall_id)
 }
