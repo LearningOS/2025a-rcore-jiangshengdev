@@ -126,6 +126,20 @@ impl TaskManager {
         inner.tasks[inner.current_task].get_trap_cx()
     }
 
+    /// Record a syscall invocation for the current task.
+    fn record_syscall(&self, syscall_id: usize) {
+        let mut inner = self.inner.exclusive_access();
+        let current = inner.current_task;
+        inner.tasks[current].record_syscall(syscall_id);
+    }
+
+    /// Query syscall invocation count for the current task.
+    fn current_syscall_count(&self, syscall_id: usize) -> Option<usize> {
+        let inner = self.inner.exclusive_access();
+        let current = inner.current_task;
+        inner.tasks[current].syscall_count(syscall_id)
+    }
+
     /// Change the current 'Running' task's program break
     pub fn change_current_program_brk(&self, size: i32) -> Option<usize> {
         let mut inner = self.inner.exclusive_access();
@@ -196,6 +210,16 @@ pub fn current_user_token() -> usize {
 /// Get the current 'Running' task's trap contexts.
 pub fn current_trap_cx() -> &'static mut TrapContext {
     TASK_MANAGER.get_current_trap_cx()
+}
+
+/// Record a syscall invocation for the current running task.
+pub fn record_syscall(syscall_id: usize) {
+    TASK_MANAGER.record_syscall(syscall_id);
+}
+
+/// Get the syscall invocation count for the current running task.
+pub fn current_syscall_count(syscall_id: usize) -> Option<usize> {
+    TASK_MANAGER.current_syscall_count(syscall_id)
 }
 
 /// Change the current 'Running' task's program break

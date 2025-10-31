@@ -1,5 +1,14 @@
 //! Process management syscalls
-use crate::task::{change_program_brk, exit_current_and_run_next, suspend_current_and_run_next};
+use crate::{
+    config::PAGE_SIZE,
+    mm::{PageTable, PTEFlags, VirtAddr},
+    task::{
+        change_program_brk, current_syscall_count, current_user_token, exit_current_and_run_next,
+        suspend_current_and_run_next,
+    },
+    timer::get_time_us,
+};
+use core::{mem, slice};
 
 #[repr(C)]
 #[derive(Debug)]
@@ -25,16 +34,52 @@ pub fn sys_yield() -> isize {
 /// YOUR JOB: get time with second and microsecond
 /// HINT: You might reimplement it with virtual memory management.
 /// HINT: What if [`TimeVal`] is splitted by two pages ?
-pub fn sys_get_time(_ts: *mut TimeVal, _tz: usize) -> isize {
+pub fn sys_get_time(ts: *mut TimeVal, _tz: usize) -> isize {
     trace!("kernel: sys_get_time");
-    -1
+    if ts.is_null() {
+        return -1;
+    }
+    let us = get_time_us();
+    let time_val = TimeVal {
+        sec: us / 1_000_000,
+        usec: us % 1_000_000,
+    };
+    let bytes =
+        unsafe { slice::from_raw_parts(&time_val as *const TimeVal as *const u8, mem::size_of::<TimeVal>()) };
+    if write_user_bytes(current_user_token(), ts as usize, bytes) {
+        0
+    } else {
+        -1
+    }
 }
 
 /// TODO: Finish sys_trace to pass testcases
 /// HINT: You might reimplement it with virtual memory management.
-pub fn sys_trace(_trace_request: usize, _id: usize, _data: usize) -> isize {
+pub fn sys_trace(trace_request: usize, id: usize, data: usize) -> isize {
     trace!("kernel: sys_trace");
-    -1
+    let token = current_user_token();
+    match trace_request {
+        0 => {
+            let mut byte = [0u8; 1];
+            if read_user_bytes(token, id, &mut byte) {
+                byte[0] as isize
+            } else {
+                -1
+            }
+        }
+        1 => {
+            let byte = [data as u8];
+            if write_user_bytes(token, id, &byte) {
+                0
+            } else {
+                -1
+            }
+        }
+        2 => current_syscall_count(id)
+            .map(|count| count as isize)
+            .unwrap_or(-1),
+        _ => -1,
+    }
 }
 
 // YOUR JOB: Implement mmap.
@@ -56,4 +101,60 @@ pub fn sys_sbrk(size: i32) -> isize {
     } else {
         -1
     }
+}
+
+fn read_user_bytes(token: usize, mut ptr: usize, buf: &mut [u8]) -> bool {
+    if buf.is_empty() {
+        return true;
+    }
+    let page_table = PageTable::from_token(token);
+    let mut processed = 0;
+    while processed < buf.len() {
+        let va = VirtAddr::from(ptr);
+        let vpn = va.floor();
+        let offset = va.page_offset();
+        let len = (PAGE_SIZE - offset).min(buf.len() - processed);
+        let pte = match page_table.translate(vpn) {
+            Some(pte) => pte,
+            None => return false,
+        };
+        let flags = pte.flags();
+        if !flags.contains(PTEFlags::U) || !flags.contains(PTEFlags::R) {
+            return false;
+        }
+        let page_data = pte.ppn().get_bytes_array();
+        buf[processed..processed + len]
+            .copy_from_slice(&page_data[offset..offset + len]);
+        processed += len;
+        ptr += len;
+    }
+    true
+}
+
+fn write_user_bytes(token: usize, mut ptr: usize, buf: &[u8]) -> bool {
+    if buf.is_empty() {
+        return true;
+    }
+    let page_table = PageTable::from_token(token);
+    let mut processed = 0;
+    while processed < buf.len() {
+        let va = VirtAddr::from(ptr);
+        let vpn = va.floor();
+        let offset = va.page_offset();
+        let len = (PAGE_SIZE - offset).min(buf.len() - processed);
+        let pte = match page_table.translate(vpn) {
+            Some(pte) => pte,
+            None => return false,
+        };
+        let flags = pte.flags();
+        if !flags.contains(PTEFlags::U) || !flags.contains(PTEFlags::W) {
+            return false;
+        }
+        let page_data = pte.ppn().get_bytes_array();
+        page_data[offset..offset + len]
+            .copy_from_slice(&buf[processed..processed + len]);
+        processed += len;
+        ptr += len;
+    }
+    true
 }
