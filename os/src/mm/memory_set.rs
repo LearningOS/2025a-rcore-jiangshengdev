@@ -70,24 +70,28 @@ impl MemorySet {
         start_va: VirtAddr,
         end_va: VirtAddr,
         permission: MapPermission,
-    ) -> Result<(), ()> {
+    ) -> Result<usize, ()> {
         if start_va >= end_va {
-            return Ok(());
+            return Err(());
         }
         let start_vpn = start_va.floor();
         let end_vpn = end_va.ceil();
         for vpn in VPNRange::new(start_vpn, end_vpn) {
-            if self.page_table.translate(vpn).is_some() {
+            if self
+                .page_table
+                .translate(vpn)
+                .map(|pte| pte.is_valid())
+                .unwrap_or(false)
+            {
                 return Err(());
             }
         }
         let mut map_area = MapArea::new(start_va, end_va, MapType::Framed, permission);
-        let mut mapped: Vec<VirtPageNum> = Vec::new();
         for vpn in VPNRange::new(start_vpn, end_vpn) {
             let frame = match frame_alloc() {
                 Some(frame) => frame,
                 None => {
-                    for rollback_vpn in mapped.into_iter() {
+                    for rollback_vpn in VPNRange::new(start_vpn, vpn) {
                         map_area.unmap_one(&mut self.page_table, rollback_vpn);
                     }
                     return Err(());
@@ -97,30 +101,37 @@ impl MemorySet {
             let pte_flags = PTEFlags::from_bits(map_area.map_perm.bits).unwrap();
             self.page_table.map(vpn, ppn, pte_flags);
             map_area.data_frames.insert(vpn, frame);
-            mapped.push(vpn);
         }
+        let area_index = self.areas.len();
         self.areas.push(map_area);
-        Ok(())
+        Ok(area_index)
     }
 
     /// Unmap a previously mapped anonymous region.
-    pub fn munmap(&mut self, start_va: VirtAddr, end_va: VirtAddr) -> Result<(), ()> {
+    pub fn munmap(
+        &mut self,
+        start_va: VirtAddr,
+        end_va: VirtAddr,
+        area_index: usize,
+    ) -> Result<(), ()> {
         if start_va >= end_va {
             return Ok(());
         }
         let start_vpn = start_va.floor();
         let end_vpn = end_va.ceil();
-        if let Some(idx) = self
-            .areas
-            .iter()
-            .position(|area| area.vpn_range.get_start() == start_vpn && area.vpn_range.get_end() == end_vpn)
-        {
-            let mut area = self.areas.swap_remove(idx);
-            area.unmap(&mut self.page_table);
-            Ok(())
-        } else {
-            Err(())
+        if area_index >= self.areas.len() {
+            return Err(());
         }
+        let range_matches = {
+            let area = &self.areas[area_index];
+            area.vpn_range.get_start() == start_vpn && area.vpn_range.get_end() == end_vpn
+        };
+        if !range_matches {
+            return Err(());
+        }
+        let mut area = self.areas.remove(area_index);
+        area.unmap(&mut self.page_table);
+        Ok(())
     }
     fn push(&mut self, mut map_area: MapArea, data: Option<&[u8]>) {
         map_area.map(&mut self.page_table);

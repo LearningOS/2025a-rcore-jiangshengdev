@@ -41,6 +41,7 @@ pub struct TaskControlBlock {
 struct MMapRegion {
     start: usize,
     len: usize,
+    area_index: usize,
 }
 
 impl TaskControlBlock {
@@ -136,15 +137,19 @@ impl TaskControlBlock {
         let end = start.checked_add(len).ok_or(())?;
         let start_va = VirtAddr::from(start);
         let end_va = VirtAddr::from(end);
-        if self
+        match self
             .memory_set
             .mmap(start_va, end_va, perm | MapPermission::U)
-            .is_ok()
         {
-            self.mmap_regions.push(MMapRegion { start, len });
-            Ok(())
-        } else {
-            Err(())
+            Ok(area_index) => {
+                self.mmap_regions.push(MMapRegion {
+                    start,
+                    len,
+                    area_index,
+                });
+                Ok(())
+            }
+            Err(()) => Err(()),
         }
     }
 
@@ -161,8 +166,14 @@ impl TaskControlBlock {
         {
             let start_va = VirtAddr::from(start);
             let end_va = VirtAddr::from(end);
-            if self.memory_set.munmap(start_va, end_va).is_ok() {
-                self.mmap_regions.swap_remove(idx);
+            let area_index = self.mmap_regions[idx].area_index;
+            if self.memory_set.munmap(start_va, end_va, area_index).is_ok() {
+                self.mmap_regions.remove(idx);
+                for region in self.mmap_regions.iter_mut() {
+                    if region.area_index > area_index {
+                        region.area_index -= 1;
+                    }
+                }
                 Ok(())
             } else {
                 Err(())

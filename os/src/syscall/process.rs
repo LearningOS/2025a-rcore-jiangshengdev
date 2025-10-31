@@ -1,7 +1,7 @@
 //! Process management syscalls
 use crate::{
     config::PAGE_SIZE,
-    mm::{MapPermission, PageTable, PTEFlags, VirtAddr},
+    mm::{MapPermission, PTEFlags, PageTable, VirtAddr},
     task::{
         change_program_brk, current_syscall_count, current_user_token, exit_current_and_run_next,
         mmap_current, munmap_current, suspend_current_and_run_next,
@@ -44,8 +44,12 @@ pub fn sys_get_time(ts: *mut TimeVal, _tz: usize) -> isize {
         sec: us / 1_000_000,
         usec: us % 1_000_000,
     };
-    let bytes =
-        unsafe { slice::from_raw_parts(&time_val as *const TimeVal as *const u8, mem::size_of::<TimeVal>()) };
+    let bytes = unsafe {
+        slice::from_raw_parts(
+            &time_val as *const TimeVal as *const u8,
+            mem::size_of::<TimeVal>(),
+        )
+    };
     if write_user_bytes(current_user_token(), ts as usize, bytes) {
         0
     } else {
@@ -156,8 +160,7 @@ fn read_user_bytes(token: usize, mut ptr: usize, buf: &mut [u8]) -> bool {
             return false;
         }
         let page_data = pte.ppn().get_bytes_array();
-        buf[processed..processed + len]
-            .copy_from_slice(&page_data[offset..offset + len]);
+        buf[processed..processed + len].copy_from_slice(&page_data[offset..offset + len]);
         processed += len;
         ptr += len;
     }
@@ -184,8 +187,7 @@ fn write_user_bytes(token: usize, mut ptr: usize, buf: &[u8]) -> bool {
             return false;
         }
         let page_data = pte.ppn().get_bytes_array();
-        page_data[offset..offset + len]
-            .copy_from_slice(&buf[processed..processed + len]);
+        page_data[offset..offset + len].copy_from_slice(&buf[processed..processed + len]);
         processed += len;
         ptr += len;
     }

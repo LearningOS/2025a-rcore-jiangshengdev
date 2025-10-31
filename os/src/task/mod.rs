@@ -14,12 +14,12 @@ mod switch;
 #[allow(clippy::module_inception)]
 mod task;
 
+use crate::sync::UPSafeCell;
+use crate::trap::TrapContext;
 use crate::{
     loader::{get_app_data, get_num_app},
     mm::MapPermission,
 };
-use crate::sync::UPSafeCell;
-use crate::trap::TrapContext;
 use alloc::vec::Vec;
 use lazy_static::*;
 use switch::__switch;
