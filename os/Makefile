@@ -26,7 +26,8 @@ OBJDUMP := rust-objdump --arch-name=riscv64
 OBJCOPY := rust-objcopy --binary-architecture=riscv64
 
 CHAPTER ?= $(shell git rev-parse --abbrev-ref HEAD | sed -E 's/ch([0-9])/\1/')
-TEST ?= $(CHAPTER)
+CHAPTER_NUM := $(firstword $(shell echo "$(CHAPTER)" | sed -n 's/[^0-9]*\([0-9][0-9]*\).*/\1/p') 0)
+TEST ?= $(CHAPTER_NUM)
 BASE ?= 1
 
 # Disassembly
