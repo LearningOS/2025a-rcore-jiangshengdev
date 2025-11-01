@@ -126,3 +126,8 @@ pub fn mmap_current(start: usize, len: usize, perm: MapPermission) -> Result<(),
 pub fn munmap_current(start: usize, len: usize) -> Result<(), MapError> {
     current_task().unwrap().munmap(start, len)
 }
+
+/// Update the current task priority for stride scheduling.
+pub fn set_current_priority(priority: usize) -> usize {
+    current_task().unwrap().set_priority(priority)
+}

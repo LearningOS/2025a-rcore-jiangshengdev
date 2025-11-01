@@ -10,6 +10,9 @@ use alloc::sync::{Arc, Weak};
 use alloc::vec::Vec;
 use core::cell::RefMut;
 
+const BIG_STRIDE: usize = 1 << 20;
+const DEFAULT_PRIORITY: usize = 16;
+
 /// Task control block structure
 ///
 /// Directly save the contents that will not change during running
@@ -72,6 +75,15 @@ pub struct TaskControlBlockInner {
 
     /// Regions created via mmap, keyed by start address
     pub mmap_regions: BTreeMap<usize, usize>,
+
+    /// Current accumulated stride for stride scheduling
+    pub stride: usize,
+
+    /// Scheduling priority (higher value means lower share)
+    pub priority: usize,
+
+    /// Increment added to stride each time the task is scheduled
+    pub pass: usize,
 }
 
 impl TaskControlBlockInner {
@@ -126,6 +138,16 @@ impl TaskControlBlockInner {
         self.mmap_regions.remove(&start);
         Ok(())
     }
+
+    fn set_priority(&mut self, priority: usize) {
+        self.priority = priority;
+        self.pass = calc_pass(priority);
+    }
+
+    pub fn bump_stride(&mut self) {
+        let increment = self.pass.max(1);
+        self.stride = self.stride.saturating_add(increment);
+    }
 }
 
 impl TaskControlBlock {
@@ -160,6 +182,9 @@ impl TaskControlBlock {
                     heap_bottom: user_sp,
                     program_brk: user_sp,
                     mmap_regions: BTreeMap::new(),
+                    stride: 0,
+                    priority: DEFAULT_PRIORITY,
+                    pass: calc_pass(DEFAULT_PRIORITY),
                 })
             },
         };
@@ -235,6 +260,9 @@ impl TaskControlBlock {
                     heap_bottom: parent_inner.heap_bottom,
                     program_brk: parent_inner.program_brk,
                     mmap_regions: parent_inner.mmap_regions.clone(),
+                    stride: parent_inner.stride,
+                    priority: parent_inner.priority,
+                    pass: parent_inner.pass,
                 })
             },
         });
@@ -290,6 +318,31 @@ impl TaskControlBlock {
     pub fn munmap(&self, start: usize, len: usize) -> Result<(), MapError> {
         self.inner_exclusive_access().munmap(start, len)
     }
+
+    /// Get current stride value used by the stride scheduler.
+    pub fn stride(&self) -> usize {
+        let inner = self.inner_exclusive_access();
+        inner.stride
+    }
+
+    /// Increase stride when the scheduler selects this task.
+    pub fn bump_stride(&self) {
+        let mut inner = self.inner_exclusive_access();
+        inner.bump_stride();
+    }
+
+    /// Adjust task priority and return the updated value.
+    pub fn set_priority(&self, priority: usize) -> usize {
+        let mut inner = self.inner_exclusive_access();
+        inner.set_priority(priority);
+        inner.priority
+    }
+
+    /// Query the current task priority.
+    pub fn priority(&self) -> usize {
+        let inner = self.inner_exclusive_access();
+        inner.priority
+    }
 }
 
 #[derive(Copy, Clone, PartialEq)]
@@ -303,4 +356,10 @@ pub enum TaskStatus {
     Running,
     /// exited
     Zombie,
+}
+
+fn calc_pass(priority: usize) -> usize {
+    let priority = priority.max(1);
+    let pass = BIG_STRIDE / priority;
+    pass.max(1)
 }

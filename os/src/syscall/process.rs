@@ -7,7 +7,7 @@ use crate::{
     mm::{translated_refmut, translated_str, write_user_value, MapPermission},
     task::{
         add_task, current_task, current_user_token, exit_current_and_run_next, mmap_current,
-        munmap_current, suspend_current_and_run_next, TaskControlBlock,
+        munmap_current, set_current_priority, suspend_current_and_run_next, TaskControlBlock,
     },
     timer::get_time_us,
 };
@@ -213,13 +213,14 @@ pub fn sys_spawn(path: *const u8) -> isize {
     pid as isize
 }
 
-// YOUR JOB: Set task priority.
-pub fn sys_set_priority(_prio: isize) -> isize {
-    trace!(
-        "kernel:pid[{}] sys_set_priority NOT IMPLEMENTED",
-        current_task().unwrap().pid.0
-    );
-    -1
+// Set task priority for stride scheduling.
+pub fn sys_set_priority(prio: isize) -> isize {
+    let task = current_task().unwrap();
+    trace!("kernel:pid[{}] sys_set_priority to {}", task.pid.0, prio);
+    if prio < 2 {
+        return -1;
+    }
+    set_current_priority(prio as usize) as isize
 }
 
 fn is_page_aligned(value: usize) -> bool {
