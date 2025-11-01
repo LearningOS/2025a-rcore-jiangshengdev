@@ -10,7 +10,6 @@ use crate::config::{
 use crate::sync::UPSafeCell;
 use alloc::collections::BTreeMap;
 use alloc::sync::Arc;
-use alloc::vec::Vec;
 use core::arch::asm;
 use lazy_static::*;
 use riscv::register::satp;
@@ -43,8 +42,6 @@ pub enum MapError {
     AlreadyMapped,
     /// Failed to allocate a required physical frame.
     OutOfMemory,
-    /// The provided area index does not exist.
-    InvalidAreaIndex,
     /// The provided range does not match the tracked map area.
     RangeMismatch,
     /// Virtual address addition overflowed.
@@ -55,7 +52,7 @@ pub enum MapError {
 /// address space
 pub struct MemorySet {
     page_table: PageTable,
-    areas: Vec<MapArea>,
+    areas: BTreeMap<VirtPageNum, MapArea>,
 }
 
 impl MemorySet {
@@ -63,7 +60,7 @@ impl MemorySet {
     pub fn new_bare() -> Self {
         Self {
             page_table: PageTable::new(),
-            areas: Vec::new(),
+            areas: BTreeMap::new(),
         }
     }
     /// Get the page table token
@@ -89,7 +86,7 @@ impl MemorySet {
         start_va: VirtAddr,
         end_va: VirtAddr,
         permission: MapPermission,
-    ) -> Result<usize, MapError> {
+    ) -> Result<(), MapError> {
         if start_va >= end_va {
             return Err(MapError::InvalidRange);
         }
@@ -121,34 +118,29 @@ impl MemorySet {
             self.page_table.map(vpn, ppn, pte_flags);
             map_area.data_frames.insert(vpn, frame);
         }
-        let area_index = self.areas.len();
-        self.areas.push(map_area);
-        Ok(area_index)
+        let start_key = map_area.vpn_range.get_start();
+        let replaced = self.areas.insert(start_key, map_area);
+        debug_assert!(replaced.is_none());
+        Ok(())
     }
 
     /// Unmap a previously mapped anonymous region.
-    pub fn munmap(
-        &mut self,
-        start_va: VirtAddr,
-        end_va: VirtAddr,
-        area_index: usize,
-    ) -> Result<(), MapError> {
+    pub fn munmap(&mut self, start_va: VirtAddr, end_va: VirtAddr) -> Result<(), MapError> {
         if start_va >= end_va {
             return Ok(());
         }
         let start_vpn = start_va.floor();
         let end_vpn = end_va.ceil();
-        if area_index >= self.areas.len() {
-            return Err(MapError::InvalidAreaIndex);
-        }
-        let range_matches = {
-            let area = &self.areas[area_index];
-            area.vpn_range.get_start() == start_vpn && area.vpn_range.get_end() == end_vpn
+        let Some(mut area) = self.areas.remove(&start_vpn) else {
+            return Err(MapError::RegionNotFound);
         };
-        if !range_matches {
+        if area.vpn_range.get_end() != end_vpn {
+            let start_key = area.vpn_range.get_start();
+            let replaced = self.areas.insert(start_key, area);
+            debug_assert!(replaced.is_none());
             return Err(MapError::RangeMismatch);
         }
-        let mut area = self.areas.remove(area_index);
+        debug_assert_eq!(start_vpn, area.vpn_range.get_start());
         area.unmap(&mut self.page_table);
         Ok(())
     }
@@ -157,7 +149,9 @@ impl MemorySet {
         if let Some(data) = data {
             map_area.copy_data(&mut self.page_table, data);
         }
-        self.areas.push(map_area);
+        let key = map_area.vpn_range.get_start();
+        let replaced = self.areas.insert(key, map_area);
+        debug_assert!(replaced.is_none());
     }
     /// Mention that trampoline is not collected by areas.
     fn map_trampoline(&mut self) {
@@ -325,11 +319,7 @@ impl MemorySet {
     /// shrink the area to new_end
     #[allow(unused)]
     pub fn shrink_to(&mut self, start: VirtAddr, new_end: VirtAddr) -> bool {
-        if let Some(area) = self
-            .areas
-            .iter_mut()
-            .find(|area| area.vpn_range.get_start() == start.floor())
-        {
+        if let Some(area) = self.areas.get_mut(&start.floor()) {
             area.shrink_to(&mut self.page_table, new_end.ceil());
             true
         } else {
@@ -340,11 +330,7 @@ impl MemorySet {
     /// append the area to new_end
     #[allow(unused)]
     pub fn append_to(&mut self, start: VirtAddr, new_end: VirtAddr) -> bool {
-        if let Some(area) = self
-            .areas
-            .iter_mut()
-            .find(|area| area.vpn_range.get_start() == start.floor())
-        {
+        if let Some(area) = self.areas.get_mut(&start.floor()) {
             area.append_to(&mut self.page_table, new_end.ceil());
             true
         } else {

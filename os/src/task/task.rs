@@ -5,7 +5,7 @@ use crate::mm::{
     kernel_stack_position, MapError, MapPermission, MemorySet, PhysPageNum, VirtAddr, KERNEL_SPACE,
 };
 use crate::trap::{trap_handler, TrapContext};
-use alloc::vec::Vec;
+use alloc::collections::BTreeMap;
 
 /// The task control block (TCB) of a task.
 pub struct TaskControlBlock {
@@ -33,15 +33,8 @@ pub struct TaskControlBlock {
     /// Per-syscall invocation counters
     syscall_counts: [usize; MAX_SYSCALL_NUM],
 
-    /// Regions created via mmap
-    mmap_regions: Vec<MMapRegion>,
-}
-
-/// Metadata of a single mmap region
-struct MMapRegion {
-    start: usize,
-    len: usize,
-    area_index: usize,
+    /// Regions created via mmap, keyed by start address
+    mmap_regions: BTreeMap<usize, usize>,
 }
 
 impl TaskControlBlock {
@@ -78,7 +71,7 @@ impl TaskControlBlock {
             heap_bottom: user_sp,
             program_brk: user_sp,
             syscall_counts: [0; MAX_SYSCALL_NUM],
-            mmap_regions: Vec::new(),
+            mmap_regions: BTreeMap::new(),
         };
         // prepare TrapContext in user space
         let trap_cx = task_control_block.get_trap_cx();
@@ -137,14 +130,9 @@ impl TaskControlBlock {
         let end = start.checked_add(len).ok_or(MapError::AddressOverflow)?;
         let start_va = VirtAddr::from(start);
         let end_va = VirtAddr::from(end);
-        let area_index = self
-            .memory_set
+        self.memory_set
             .mmap(start_va, end_va, perm | MapPermission::U)?;
-        self.mmap_regions.push(MMapRegion {
-            start,
-            len,
-            area_index,
-        });
+        self.mmap_regions.insert(start, len);
         Ok(())
     }
 
@@ -154,21 +142,16 @@ impl TaskControlBlock {
             return Ok(());
         }
         let end = start.checked_add(len).ok_or(MapError::AddressOverflow)?;
-        let idx = self
-            .mmap_regions
-            .iter()
-            .position(|region| region.start == start && region.len == len)
-            .ok_or(MapError::RegionNotFound)?;
+        let Some(&recorded_len) = self.mmap_regions.get(&start) else {
+            return Err(MapError::RegionNotFound);
+        };
+        if recorded_len != len {
+            return Err(MapError::RangeMismatch);
+        }
         let start_va = VirtAddr::from(start);
         let end_va = VirtAddr::from(end);
-        let area_index = self.mmap_regions[idx].area_index;
-        self.memory_set.munmap(start_va, end_va, area_index)?;
-        self.mmap_regions.remove(idx);
-        for region in self.mmap_regions.iter_mut() {
-            if region.area_index > area_index {
-                region.area_index -= 1;
-            }
-        }
+        self.memory_set.munmap(start_va, end_va)?;
+        self.mmap_regions.remove(&start);
         Ok(())
     }
 }
