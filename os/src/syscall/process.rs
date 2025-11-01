@@ -1,17 +1,16 @@
 //! Process management syscalls
 use crate::{
     config::PAGE_SIZE,
-    mm::{MapPermission, PTEFlags, PageTable, VirtAddr},
+    mm::{read_user_u8, write_user_u8, write_user_value, MapPermission},
     task::{
         change_program_brk, current_syscall_count, current_user_token, exit_current_and_run_next,
         mmap_current, munmap_current, suspend_current_and_run_next,
     },
     timer::get_time_us,
 };
-use core::{mem, slice};
 
 #[repr(C)]
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone)]
 pub struct TimeVal {
     pub sec: usize,
     pub usec: usize,
@@ -44,13 +43,7 @@ pub fn sys_get_time(ts: *mut TimeVal, _tz: usize) -> isize {
         sec: us / 1_000_000,
         usec: us % 1_000_000,
     };
-    let bytes = unsafe {
-        slice::from_raw_parts(
-            &time_val as *const TimeVal as *const u8,
-            mem::size_of::<TimeVal>(),
-        )
-    };
-    if write_user_bytes(current_user_token(), ts as usize, bytes) {
+    if write_user_value(current_user_token(), ts, &time_val) {
         0
     } else {
         -1
@@ -63,17 +56,11 @@ pub fn sys_trace(trace_request: usize, id: usize, data: usize) -> isize {
     trace!("kernel: sys_trace");
     let token = current_user_token();
     match trace_request {
-        0 => {
-            let mut byte = [0u8; 1];
-            if read_user_bytes(token, id, &mut byte) {
-                byte[0] as isize
-            } else {
-                -1
-            }
-        }
+        0 => read_user_u8(token, id)
+            .map(|byte| byte as isize)
+            .unwrap_or(-1),
         1 => {
-            let byte = [data as u8];
-            if write_user_bytes(token, id, &byte) {
+            if write_user_u8(token, id, data as u8) {
                 0
             } else {
                 -1
@@ -132,60 +119,6 @@ pub fn sys_sbrk(size: i32) -> isize {
     } else {
         -1
     }
-}
-
-fn read_user_bytes(token: usize, mut ptr: usize, buf: &mut [u8]) -> bool {
-    if buf.is_empty() {
-        return true;
-    }
-    let page_table = PageTable::from_token(token);
-    let mut processed = 0;
-    while processed < buf.len() {
-        let va = VirtAddr::from(ptr);
-        let vpn = va.floor();
-        let offset = va.page_offset();
-        let len = (PAGE_SIZE - offset).min(buf.len() - processed);
-        let pte = match page_table.translate(vpn) {
-            Some(pte) => pte,
-            None => return false,
-        };
-        let flags = pte.flags();
-        if !flags.contains(PTEFlags::U) || !flags.contains(PTEFlags::R) {
-            return false;
-        }
-        let page_data = pte.ppn().get_bytes_array();
-        buf[processed..processed + len].copy_from_slice(&page_data[offset..offset + len]);
-        processed += len;
-        ptr += len;
-    }
-    true
-}
-
-fn write_user_bytes(token: usize, mut ptr: usize, buf: &[u8]) -> bool {
-    if buf.is_empty() {
-        return true;
-    }
-    let page_table = PageTable::from_token(token);
-    let mut processed = 0;
-    while processed < buf.len() {
-        let va = VirtAddr::from(ptr);
-        let vpn = va.floor();
-        let offset = va.page_offset();
-        let len = (PAGE_SIZE - offset).min(buf.len() - processed);
-        let pte = match page_table.translate(vpn) {
-            Some(pte) => pte,
-            None => return false,
-        };
-        let flags = pte.flags();
-        if !flags.contains(PTEFlags::U) || !flags.contains(PTEFlags::W) {
-            return false;
-        }
-        let page_data = pte.ppn().get_bytes_array();
-        page_data[offset..offset + len].copy_from_slice(&buf[processed..processed + len]);
-        processed += len;
-        ptr += len;
-    }
-    true
 }
 
 fn is_page_aligned(addr: usize) -> bool {
