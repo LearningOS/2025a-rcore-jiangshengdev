@@ -8,6 +8,7 @@ use crate::{
     },
     timer::get_time_us,
 };
+use bitflags::bitflags;
 
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
@@ -103,7 +104,7 @@ pub fn sys_munmap(start: usize, len: usize) -> isize {
     if len == 0 {
         return 0;
     }
-    if len % PAGE_SIZE != 0 {
+    if !is_page_aligned(len) {
         return -1;
     }
     if start.checked_add(len).is_none() {
@@ -135,21 +136,27 @@ fn align_len(len: usize) -> Option<usize> {
 }
 
 fn prot_to_perm(prot: usize) -> Option<MapPermission> {
-    if prot & !0x7 != 0 {
+    let flags = ProtFlags::from_bits(prot)?;
+    if flags.is_empty() {
         return None;
     }
-    if prot & 0x7 == 0 {
-        return None;
-    }
-    let mut perm = MapPermission::empty();
-    if prot & 0x1 != 0 {
+    let mut perm = MapPermission::U;
+    if flags.contains(ProtFlags::READ) {
         perm |= MapPermission::R;
     }
-    if prot & 0x2 != 0 {
+    if flags.contains(ProtFlags::WRITE) {
         perm |= MapPermission::W;
     }
-    if prot & 0x4 != 0 {
+    if flags.contains(ProtFlags::EXECUTE) {
         perm |= MapPermission::X;
     }
     Some(perm)
+}
+
+bitflags! {
+    struct ProtFlags: usize {
+        const READ = 1 << 0;
+        const WRITE = 1 << 1;
+        const EXECUTE = 1 << 2;
+    }
 }
