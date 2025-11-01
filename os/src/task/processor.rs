@@ -46,6 +46,12 @@ impl Processor {
     }
 }
 
+impl Default for Processor {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 lazy_static! {
     pub static ref PROCESSOR: UPSafeCell<Processor> = unsafe { UPSafeCell::new(Processor::new()) };
 }
@@ -102,11 +108,13 @@ pub fn current_trap_cx() -> &'static mut TrapContext {
 }
 
 ///Return to idle control flow for new scheduling
-pub fn schedule(switched_task_cx_ptr: *mut TaskContext) {
+///
+/// # Safety
+/// Caller must ensure `switched_task_cx_ptr` points to a valid [`TaskContext`] belonging to the
+/// task being suspended.
+pub unsafe fn schedule(switched_task_cx_ptr: *mut TaskContext) {
     let mut processor = PROCESSOR.exclusive_access();
     let idle_task_cx_ptr = processor.get_idle_task_cx_ptr();
     drop(processor);
-    unsafe {
-        __switch(switched_task_cx_ptr, idle_task_cx_ptr);
-    }
+    __switch(switched_task_cx_ptr, idle_task_cx_ptr);
 }

@@ -18,6 +18,10 @@ unsafe impl<T> Sync for UPSafeCell<T> {}
 impl<T> UPSafeCell<T> {
     /// User is responsible to guarantee that inner struct is only used in
     /// uniprocessor.
+    ///
+    /// # Safety
+    ///
+    /// Caller must ensure the wrapped value is accessed from a single core at a time.
     pub unsafe fn new(value: T) -> Self {
         Self {
             inner: RefCell::new(value),
