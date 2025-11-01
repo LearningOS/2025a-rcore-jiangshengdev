@@ -22,6 +22,7 @@ mod switch;
 mod task;
 
 use crate::loader::get_app_data_by_name;
+use crate::mm::{MapError, MapPermission};
 use alloc::sync::Arc;
 use lazy_static::*;
 pub use manager::{fetch_task, TaskManager};
@@ -114,4 +115,14 @@ lazy_static! {
 ///Add init process to the manager
 pub fn add_initproc() {
     add_task(INITPROC.clone());
+}
+
+/// Map an anonymous memory region for the current running task.
+pub fn mmap_current(start: usize, len: usize, perm: MapPermission) -> Result<(), MapError> {
+    current_task().unwrap().mmap(start, len, perm)
+}
+
+/// Unmap an anonymous memory region for the current running task.
+pub fn munmap_current(start: usize, len: usize) -> Result<(), MapError> {
+    current_task().unwrap().munmap(start, len)
 }

@@ -2,16 +2,19 @@
 use alloc::sync::Arc;
 
 use crate::{
+    config::PAGE_SIZE,
     loader::get_app_data_by_name,
-    mm::{translated_refmut, translated_str},
+    mm::{translated_refmut, translated_str, write_user_value, MapPermission},
     task::{
-        add_task, current_task, current_user_token, exit_current_and_run_next,
-        suspend_current_and_run_next,
+        add_task, current_task, current_user_token, exit_current_and_run_next, mmap_current,
+        munmap_current, suspend_current_and_run_next,
     },
+    timer::get_time_us,
 };
+use bitflags::bitflags;
 
 #[repr(C)]
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone)]
 pub struct TimeVal {
     pub sec: usize,
     pub usec: usize,
@@ -106,33 +109,74 @@ pub fn sys_waitpid(pid: isize, exit_code_ptr: *mut i32) -> isize {
     // ---- release current PCB automatically
 }
 
-/// YOUR JOB: get time with second and microsecond
+/// get time with second and microsecond
 /// HINT: You might reimplement it with virtual memory management.
 /// HINT: What if [`TimeVal`] is splitted by two pages ?
-pub fn sys_get_time(_ts: *mut TimeVal, _tz: usize) -> isize {
-    trace!(
-        "kernel:pid[{}] sys_get_time NOT IMPLEMENTED",
-        current_task().unwrap().pid.0
-    );
-    -1
+pub fn sys_get_time(ts: *mut TimeVal, _tz: usize) -> isize {
+    trace!("kernel:pid[{}] sys_get_time", current_task().unwrap().pid.0);
+    if ts.is_null() {
+        return -1;
+    }
+    let us = get_time_us();
+    let value = TimeVal {
+        sec: us / 1_000_000,
+        usec: us % 1_000_000,
+    };
+    if write_user_value(current_user_token(), ts, &value) {
+        0
+    } else {
+        -1
+    }
 }
 
-/// YOUR JOB: Implement mmap.
-pub fn sys_mmap(_start: usize, _len: usize, _port: usize) -> isize {
+/// Implement mmap.
+pub fn sys_mmap(start: usize, len: usize, prot: usize) -> isize {
     trace!(
-        "kernel:pid[{}] sys_mmap NOT IMPLEMENTED",
-        current_task().unwrap().pid.0
+        "kernel:pid[{}] sys_mmap start={:#x} len={:#x} prot={:#x}",
+        current_task().unwrap().pid.0,
+        start,
+        len,
+        prot
     );
-    -1
+    if !is_page_aligned(start) {
+        return -1;
+    }
+    let Some(perm) = prot_to_perm(prot) else {
+        return -1;
+    };
+    let Some(len_aligned) = align_len(len) else {
+        return -1;
+    };
+    if len_aligned == 0 {
+        return 0;
+    }
+    if start.checked_add(len_aligned).is_none() {
+        return -1;
+    }
+    mmap_current(start, len_aligned, perm).map_or(-1, |_| 0)
 }
 
-/// YOUR JOB: Implement munmap.
-pub fn sys_munmap(_start: usize, _len: usize) -> isize {
+/// Implement munmap.
+pub fn sys_munmap(start: usize, len: usize) -> isize {
     trace!(
-        "kernel:pid[{}] sys_munmap NOT IMPLEMENTED",
-        current_task().unwrap().pid.0
+        "kernel:pid[{}] sys_munmap start={:#x} len={:#x}",
+        current_task().unwrap().pid.0,
+        start,
+        len
     );
-    -1
+    if !is_page_aligned(start) {
+        return -1;
+    }
+    if len == 0 {
+        return 0;
+    }
+    let Some(len_aligned) = align_len(len) else {
+        return -1;
+    };
+    if start.checked_add(len_aligned).is_none() {
+        return -1;
+    }
+    munmap_current(start, len_aligned).map_or(-1, |_| 0)
 }
 
 /// change data segment size
@@ -162,4 +206,43 @@ pub fn sys_set_priority(_prio: isize) -> isize {
         current_task().unwrap().pid.0
     );
     -1
+}
+
+fn is_page_aligned(value: usize) -> bool {
+    value % PAGE_SIZE == 0
+}
+
+fn align_len(len: usize) -> Option<usize> {
+    if len == 0 {
+        Some(0)
+    } else {
+        let pages = ((len.checked_sub(1)?) / PAGE_SIZE).checked_add(1)?;
+        pages.checked_mul(PAGE_SIZE)
+    }
+}
+
+fn prot_to_perm(prot: usize) -> Option<MapPermission> {
+    let flags = ProtFlags::from_bits(prot)?;
+    if flags.is_empty() {
+        return None;
+    }
+    let mut perm = MapPermission::U;
+    if flags.contains(ProtFlags::READ) {
+        perm |= MapPermission::R;
+    }
+    if flags.contains(ProtFlags::WRITE) {
+        perm |= MapPermission::W;
+    }
+    if flags.contains(ProtFlags::EXECUTE) {
+        perm |= MapPermission::X;
+    }
+    Some(perm)
+}
+
+bitflags! {
+    struct ProtFlags: usize {
+        const READ = 1 << 0;
+        const WRITE = 1 << 1;
+        const EXECUTE = 1 << 2;
+    }
 }

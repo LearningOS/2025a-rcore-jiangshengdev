@@ -2,9 +2,10 @@
 use super::TaskContext;
 use super::{kstack_alloc, pid_alloc, KernelStack, PidHandle};
 use crate::config::TRAP_CONTEXT_BASE;
-use crate::mm::{MemorySet, PhysPageNum, VirtAddr, KERNEL_SPACE};
+use crate::mm::{MapError, MapPermission, MemorySet, PhysPageNum, VirtAddr, KERNEL_SPACE};
 use crate::sync::UPSafeCell;
 use crate::trap::{trap_handler, TrapContext};
+use alloc::collections::BTreeMap;
 use alloc::sync::{Arc, Weak};
 use alloc::vec::Vec;
 use core::cell::RefMut;
@@ -68,6 +69,9 @@ pub struct TaskControlBlockInner {
 
     /// Program break
     pub program_brk: usize,
+
+    /// Regions created via mmap, keyed by start address
+    pub mmap_regions: BTreeMap<usize, usize>,
 }
 
 impl TaskControlBlockInner {
@@ -84,6 +88,43 @@ impl TaskControlBlockInner {
     }
     pub fn is_zombie(&self) -> bool {
         self.get_status() == TaskStatus::Zombie
+    }
+
+    /// Map a new anonymous memory region for the task.
+    pub fn mmap(&mut self, start: usize, len: usize, perm: MapPermission) -> Result<(), MapError> {
+        if len == 0 {
+            return Ok(());
+        }
+        let end = start.checked_add(len).ok_or(MapError::AddressOverflow)?;
+        if self.mmap_regions.contains_key(&start) {
+            return Err(MapError::AlreadyMapped);
+        }
+        let start_va = VirtAddr::from(start);
+        let end_va = VirtAddr::from(end);
+        self.memory_set
+            .mmap(start_va, end_va, perm | MapPermission::U)?;
+        self.mmap_regions.insert(start, len);
+        Ok(())
+    }
+
+    /// Unmap a previously mapped anonymous memory region.
+    pub fn munmap(&mut self, start: usize, len: usize) -> Result<(), MapError> {
+        if len == 0 {
+            return Ok(());
+        }
+        let end = start.checked_add(len).ok_or(MapError::AddressOverflow)?;
+        let recorded_len = self
+            .mmap_regions
+            .get(&start)
+            .ok_or(MapError::RegionNotFound)?;
+        if *recorded_len != len {
+            return Err(MapError::RangeMismatch);
+        }
+        let start_va = VirtAddr::from(start);
+        let end_va = VirtAddr::from(end);
+        self.memory_set.munmap(start_va, end_va)?;
+        self.mmap_regions.remove(&start);
+        Ok(())
     }
 }
 
@@ -118,6 +159,7 @@ impl TaskControlBlock {
                     exit_code: 0,
                     heap_bottom: user_sp,
                     program_brk: user_sp,
+                    mmap_regions: BTreeMap::new(),
                 })
             },
         };
@@ -150,6 +192,7 @@ impl TaskControlBlock {
         inner.trap_cx_ppn = trap_cx_ppn;
         // initialize base_size
         inner.base_size = user_sp;
+        inner.mmap_regions.clear();
         // initialize trap_cx
         let trap_cx = inner.get_trap_cx();
         *trap_cx = TrapContext::app_init_context(
@@ -191,6 +234,7 @@ impl TaskControlBlock {
                     exit_code: 0,
                     heap_bottom: parent_inner.heap_bottom,
                     program_brk: parent_inner.program_brk,
+                    mmap_regions: parent_inner.mmap_regions.clone(),
                 })
             },
         });
@@ -235,6 +279,16 @@ impl TaskControlBlock {
         } else {
             None
         }
+    }
+
+    /// Map a new anonymous region for the task.
+    pub fn mmap(&self, start: usize, len: usize, perm: MapPermission) -> Result<(), MapError> {
+        self.inner_exclusive_access().mmap(start, len, perm)
+    }
+
+    /// Unmap a previously mapped anonymous region for the task.
+    pub fn munmap(&self, start: usize, len: usize) -> Result<(), MapError> {
+        self.inner_exclusive_access().munmap(start, len)
     }
 }
 
