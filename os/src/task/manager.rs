@@ -1,8 +1,8 @@
 //!Implementation of [`TaskManager`]
 use super::TaskControlBlock;
 use crate::sync::UPSafeCell;
+use alloc::collections::BinaryHeap;
 use alloc::sync::Arc;
-use alloc::vec::Vec;
 use core::cmp::Ordering;
 use lazy_static::*;
 /// Stride comparator that handles overflow correctly
@@ -21,38 +21,52 @@ impl StrideComparator {
     }
 }
 
-///An array of `TaskControlBlock` that is thread-safe
-pub struct TaskManager {
-    ready_queue: Vec<Arc<TaskControlBlock>>,
+/// Wrapper for TaskControlBlock that implements Ord for min-heap behavior
+/// based on stride values with overflow handling
+struct TaskWrapper(Arc<TaskControlBlock>);
+
+impl PartialEq for TaskWrapper {
+    fn eq(&self, other: &Self) -> bool {
+        self.0.stride() == other.0.stride()
+    }
 }
 
-/// A simple FIFO scheduler.
+impl Eq for TaskWrapper {}
+
+impl PartialOrd for TaskWrapper {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for TaskWrapper {
+    fn cmp(&self, other: &Self) -> Ordering {
+        // Reverse ordering for min-heap: if self < other, return Greater
+        // This makes BinaryHeap (max-heap) behave as min-heap
+        StrideComparator::partial_cmp(other.0.stride(), self.0.stride())
+    }
+}
+
+///An array of `TaskControlBlock` that is thread-safe
+pub struct TaskManager {
+    ready_queue: BinaryHeap<TaskWrapper>,
+}
+
+/// A stride scheduler using priority queue.
 impl TaskManager {
     ///Create an empty TaskManager
     pub fn new() -> Self {
         Self {
-            ready_queue: Vec::new(),
+            ready_queue: BinaryHeap::new(),
         }
     }
     /// Add process back to ready queue
     pub fn add(&mut self, task: Arc<TaskControlBlock>) {
-        self.ready_queue.push(task);
+        self.ready_queue.push(TaskWrapper(task));
     }
     /// Take a process out of the ready queue
     pub fn fetch(&mut self) -> Option<Arc<TaskControlBlock>> {
-        if self.ready_queue.is_empty() {
-            return None;
-        }
-        let mut best_idx = 0;
-        let mut best_stride = self.ready_queue[0].stride();
-        for idx in 1..self.ready_queue.len() {
-            let stride = self.ready_queue[idx].stride();
-            if StrideComparator::partial_cmp(stride, best_stride) == Ordering::Less {
-                best_stride = stride;
-                best_idx = idx;
-            }
-        }
-        Some(self.ready_queue.remove(best_idx))
+        self.ready_queue.pop().map(|wrapper| wrapper.0)
     }
 }
 
