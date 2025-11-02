@@ -4,7 +4,7 @@
 //!
 //! `UPSafeCell<OSInodeInner>` -> `OSInode`: for static `ROOT_INODE`,we
 //! need to wrap `OSInodeInner` into `UPSafeCell`
-use super::File;
+use super::{File, StatMode};
 use crate::drivers::BLOCK_DEVICE;
 use crate::mm::UserBuffer;
 use crate::sync::UPSafeCell;
@@ -12,7 +12,7 @@ use alloc::sync::Arc;
 use alloc::vec;
 use alloc::vec::Vec;
 use bitflags::*;
-use easy_fs::{EasyFileSystem, Inode};
+use easy_fs::{DiskInodeType, EasyFileSystem, Inode};
 use lazy_static::*;
 
 /// inode in memory
@@ -52,6 +52,20 @@ impl OSInode {
             v.extend_from_slice(&buffer[..len]);
         }
         v
+    }
+
+    /// Retrieve basic stat information of the underlying inode.
+    pub fn metadata(&self) -> (u32, StatMode, u32) {
+        let inode = {
+            let inner = self.inner.exclusive_access();
+            Arc::clone(&inner.inode)
+        };
+        let (inode_type, nlink) = inode.stat_info();
+        let mode = match inode_type {
+            DiskInodeType::Directory => StatMode::DIR,
+            DiskInodeType::File => StatMode::FILE,
+        };
+        (inode.inode_id(), mode, nlink)
     }
 }
 
@@ -126,6 +140,46 @@ pub fn open_file(name: &str, flags: OpenFlags) -> Option<Arc<OSInode>> {
     }
 }
 
+/// Link a new directory entry `new` to the inode referenced by `old`.
+pub fn link_file(old: &str, new: &str) -> bool {
+    if old == new {
+        return false;
+    }
+    let inode = ROOT_INODE.find(old);
+    if inode.is_none() {
+        return false;
+    }
+    let inode = inode.unwrap();
+    if inode.is_dir() {
+        return false;
+    }
+    if ROOT_INODE.find(new).is_some() {
+        return false;
+    }
+    ROOT_INODE.add_link(new, &inode)
+}
+
+/// Remove directory entry `name` and release the inode if no links remain.
+pub fn unlink_file(name: &str) -> bool {
+    let inode = ROOT_INODE.find(name);
+    if inode.is_none() {
+        return false;
+    }
+    let inode = inode.unwrap();
+    if inode.is_dir() {
+        return false;
+    }
+    if ROOT_INODE.remove_dirent(name).is_none() {
+        return false;
+    }
+    let remaining = inode.dec_nlink();
+    if remaining == 0 {
+        inode.clear();
+        inode.dealloc();
+    }
+    true
+}
+
 impl File for OSInode {
     fn readable(&self) -> bool {
         self.readable
@@ -156,5 +210,8 @@ impl File for OSInode {
             total_write_size += write_size;
         }
         total_write_size
+    }
+    fn stat(&self) -> Option<(u32, StatMode, u32)> {
+        Some(self.metadata())
     }
 }
