@@ -8,13 +8,21 @@ use bitflags::*;
 bitflags! {
     /// page table entry flags
     pub struct PTEFlags: u8 {
+        /// Valid flag; indicates the PTE is active.
         const V = 1 << 0;
+        /// Read permission.
         const R = 1 << 1;
+        /// Write permission.
         const W = 1 << 2;
+        /// Execute permission.
         const X = 1 << 3;
+        /// User-mode accessibility.
         const U = 1 << 4;
+        /// Global mapping flag.
         const G = 1 << 5;
+        /// Accessed flag, set by hardware on access.
         const A = 1 << 6;
+        /// Dirty flag, set when the page is written.
         const D = 1 << 7;
     }
 }

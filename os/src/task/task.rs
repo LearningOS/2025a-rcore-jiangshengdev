@@ -3,13 +3,17 @@ use super::TaskContext;
 use super::{kstack_alloc, pid_alloc, KernelStack, PidHandle};
 use crate::config::TRAP_CONTEXT_BASE;
 use crate::fs::{File, Stdin, Stdout};
-use crate::mm::{MemorySet, PhysPageNum, VirtAddr, KERNEL_SPACE};
+use crate::mm::{MapError, MapPermission, MemorySet, PhysPageNum, VirtAddr, KERNEL_SPACE};
 use crate::sync::UPSafeCell;
 use crate::trap::{trap_handler, TrapContext};
+use alloc::collections::BTreeMap;
 use alloc::sync::{Arc, Weak};
 use alloc::vec;
 use alloc::vec::Vec;
 use core::cell::RefMut;
+
+const BIG_STRIDE: usize = 1 << 20;
+const DEFAULT_PRIORITY: usize = 16;
 
 /// Task control block structure
 ///
@@ -71,6 +75,18 @@ pub struct TaskControlBlockInner {
 
     /// Program break
     pub program_brk: usize,
+
+    /// Regions created via mmap, keyed by start address
+    pub mmap_regions: BTreeMap<usize, usize>,
+
+    /// Current accumulated stride for stride scheduling
+    pub stride: usize,
+
+    /// Scheduling priority (higher means lower share)
+    pub priority: usize,
+
+    /// Increment added to stride after each scheduling slice
+    pub pass: usize,
 }
 
 impl TaskControlBlockInner {
@@ -93,6 +109,53 @@ impl TaskControlBlockInner {
             self.fd_table.push(None);
             self.fd_table.len() - 1
         }
+    }
+
+    /// Map a new anonymous memory region for the task.
+    pub fn mmap(&mut self, start: usize, len: usize, perm: MapPermission) -> Result<(), MapError> {
+        if len == 0 {
+            return Ok(());
+        }
+        let end = start.checked_add(len).ok_or(MapError::AddressOverflow)?;
+        if self.mmap_regions.contains_key(&start) {
+            return Err(MapError::AlreadyMapped);
+        }
+        let start_va = VirtAddr::from(start);
+        let end_va = VirtAddr::from(end);
+        let perm = perm | MapPermission::U;
+        self.memory_set.mmap(start_va, end_va, perm)?;
+        self.mmap_regions.insert(start, len);
+        Ok(())
+    }
+
+    /// Unmap a previously mapped anonymous memory region.
+    pub fn munmap(&mut self, start: usize, len: usize) -> Result<(), MapError> {
+        if len == 0 {
+            return Ok(());
+        }
+        let end = start.checked_add(len).ok_or(MapError::AddressOverflow)?;
+        let recorded_len = self
+            .mmap_regions
+            .get(&start)
+            .ok_or(MapError::RegionNotFound)?;
+        if *recorded_len != len {
+            return Err(MapError::RangeMismatch);
+        }
+        let start_va = VirtAddr::from(start);
+        let end_va = VirtAddr::from(end);
+        self.memory_set.munmap(start_va, end_va)?;
+        self.mmap_regions.remove(&start);
+        Ok(())
+    }
+
+    fn set_priority(&mut self, priority: usize) {
+        self.priority = priority;
+        self.pass = calc_pass(priority);
+    }
+
+    pub fn bump_stride(&mut self) {
+        let increment = self.pass.max(1);
+        self.stride = self.stride.saturating_add(increment);
     }
 }
 
@@ -135,6 +198,10 @@ impl TaskControlBlock {
                     ],
                     heap_bottom: user_sp,
                     program_brk: user_sp,
+                    mmap_regions: BTreeMap::new(),
+                    stride: 0,
+                    priority: DEFAULT_PRIORITY,
+                    pass: calc_pass(DEFAULT_PRIORITY),
                 })
             },
         };
@@ -165,6 +232,12 @@ impl TaskControlBlock {
         inner.memory_set = memory_set;
         // update trap_cx ppn
         inner.trap_cx_ppn = trap_cx_ppn;
+        inner.base_size = user_sp;
+        inner.heap_bottom = user_sp;
+        inner.program_brk = user_sp;
+        inner.mmap_regions.clear();
+        inner.stride = 0;
+        inner.pass = calc_pass(inner.priority);
         // initialize trap_cx
         let trap_cx = TrapContext::app_init_context(
             entry_point,
@@ -216,6 +289,10 @@ impl TaskControlBlock {
                     fd_table: new_fd_table,
                     heap_bottom: parent_inner.heap_bottom,
                     program_brk: parent_inner.program_brk,
+                    mmap_regions: parent_inner.mmap_regions.clone(),
+                    stride: parent_inner.stride,
+                    priority: parent_inner.priority,
+                    pass: parent_inner.pass,
                 })
             },
         });
@@ -261,6 +338,38 @@ impl TaskControlBlock {
             None
         }
     }
+
+    /// Map a new anonymous region for the task.
+    pub fn mmap(&self, start: usize, len: usize, perm: MapPermission) -> Result<(), MapError> {
+        self.inner_exclusive_access().mmap(start, len, perm)
+    }
+
+    /// Unmap a previously mapped anonymous region for the task.
+    pub fn munmap(&self, start: usize, len: usize) -> Result<(), MapError> {
+        self.inner_exclusive_access().munmap(start, len)
+    }
+
+    /// Get current stride value used by the stride scheduler.
+    pub fn stride(&self) -> usize {
+        self.inner_exclusive_access().stride
+    }
+
+    /// Increase stride when the scheduler selects this task.
+    pub fn bump_stride(&self) {
+        self.inner_exclusive_access().bump_stride();
+    }
+
+    /// Adjust task priority and return the updated value.
+    pub fn set_priority(&self, priority: usize) -> usize {
+        let mut inner = self.inner_exclusive_access();
+        inner.set_priority(priority);
+        inner.priority
+    }
+
+    /// Query the current task priority.
+    pub fn priority(&self) -> usize {
+        self.inner_exclusive_access().priority
+    }
 }
 
 #[derive(Copy, Clone, PartialEq)]
@@ -274,4 +383,10 @@ pub enum TaskStatus {
     Running,
     /// exited
     Zombie,
+}
+
+fn calc_pass(priority: usize) -> usize {
+    let priority = priority.max(1);
+    let pass = BIG_STRIDE / priority;
+    pass.max(1)
 }

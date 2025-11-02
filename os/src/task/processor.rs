@@ -61,6 +61,7 @@ pub fn run_tasks() {
             let mut task_inner = task.inner_exclusive_access();
             let next_task_cx_ptr = &task_inner.task_cx as *const TaskContext;
             task_inner.task_status = TaskStatus::Running;
+            task_inner.bump_stride();
             // release coming task_inner manually
             drop(task_inner);
             // release coming task TCB manually
@@ -101,11 +102,12 @@ pub fn current_trap_cx() -> &'static mut TrapContext {
 }
 
 ///Return to idle control flow for new scheduling
-pub fn schedule(switched_task_cx_ptr: *mut TaskContext) {
+///
+/// # Safety
+/// Caller must ensure `switched_task_cx_ptr` points to a valid [`TaskContext`].
+pub unsafe fn schedule(switched_task_cx_ptr: *mut TaskContext) {
     let mut processor = PROCESSOR.exclusive_access();
     let idle_task_cx_ptr = processor.get_idle_task_cx_ptr();
     drop(processor);
-    unsafe {
-        __switch(switched_task_cx_ptr, idle_task_cx_ptr);
-    }
+    __switch(switched_task_cx_ptr, idle_task_cx_ptr);
 }

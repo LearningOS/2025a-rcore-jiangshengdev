@@ -23,6 +23,7 @@ mod switch;
 mod task;
 
 use crate::fs::{open_file, OpenFlags};
+use crate::mm::{MapError, MapPermission};
 use alloc::sync::Arc;
 pub use context::TaskContext;
 use lazy_static::*;
@@ -52,7 +53,9 @@ pub fn suspend_current_and_run_next() {
     // push back to ready queue.
     add_task(task);
     // jump to scheduling cycle
-    schedule(task_cx_ptr);
+    unsafe {
+        schedule(task_cx_ptr);
+    }
 }
 
 /// pid of usertests app in make run TEST=1
@@ -101,7 +104,9 @@ pub fn exit_current_and_run_next(exit_code: i32) {
     drop(task);
     // we do not have to save task context
     let mut _unused = TaskContext::zero_init();
-    schedule(&mut _unused as *mut _);
+    unsafe {
+        schedule(&mut _unused as *mut _);
+    }
 }
 
 lazy_static! {
@@ -119,4 +124,19 @@ lazy_static! {
 ///Add init process to the manager
 pub fn add_initproc() {
     add_task(INITPROC.clone());
+}
+
+/// Map an anonymous memory region for the current running task.
+pub fn mmap_current(start: usize, len: usize, perm: MapPermission) -> Result<(), MapError> {
+    current_task().unwrap().mmap(start, len, perm)
+}
+
+/// Unmap an anonymous memory region for the current running task.
+pub fn munmap_current(start: usize, len: usize) -> Result<(), MapError> {
+    current_task().unwrap().munmap(start, len)
+}
+
+/// Update the current task priority for stride scheduling.
+pub fn set_current_priority(priority: usize) -> usize {
+    current_task().unwrap().set_priority(priority)
 }
