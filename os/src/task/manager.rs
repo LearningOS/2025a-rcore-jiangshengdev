@@ -3,7 +3,24 @@ use super::TaskControlBlock;
 use crate::sync::UPSafeCell;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
+use core::cmp::Ordering;
 use lazy_static::*;
+/// Stride comparator that handles overflow correctly
+struct StrideComparator;
+
+impl StrideComparator {
+    /// Compare two stride values handling potential overflow.
+    /// Returns Ordering::Less if stride1 should be scheduled before stride2.
+    /// 
+    /// This uses signed difference comparison to handle wraparound:
+    /// If (stride1 - stride2) when interpreted as signed is negative,
+    /// then stride1 < stride2 in the circular stride space.
+    fn partial_cmp(stride1: usize, stride2: usize) -> Ordering {
+        let diff = stride1.wrapping_sub(stride2) as isize;
+        diff.cmp(&0)
+    }
+}
+
 ///A array of `TaskControlBlock` that is thread-safe
 pub struct TaskManager {
     ready_queue: Vec<Arc<TaskControlBlock>>,
@@ -30,7 +47,7 @@ impl TaskManager {
         let mut best_stride = self.ready_queue[0].stride();
         for idx in 1..self.ready_queue.len() {
             let stride = self.ready_queue[idx].stride();
-            if stride < best_stride {
+            if StrideComparator::partial_cmp(stride, best_stride) == Ordering::Less {
                 best_stride = stride;
                 best_idx = idx;
             }
