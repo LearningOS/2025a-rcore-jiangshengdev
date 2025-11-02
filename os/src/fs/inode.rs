@@ -9,6 +9,7 @@ use crate::drivers::BLOCK_DEVICE;
 use crate::mm::UserBuffer;
 use crate::sync::UPSafeCell;
 use alloc::sync::Arc;
+use alloc::vec;
 use alloc::vec::Vec;
 use bitflags::*;
 use easy_fs::{EasyFileSystem, Inode};
@@ -40,8 +41,7 @@ impl OSInode {
     /// read all data from the inode
     pub fn read_all(&self) -> Vec<u8> {
         let mut inner = self.inner.exclusive_access();
-        let mut buffer: Vec<u8> = Vec::with_capacity(512);
-        buffer.resize(512, 0);
+        let mut buffer = vec![0; 512];
         let mut v: Vec<u8> = Vec::new();
         loop {
             let len = inner.inode.read_at(inner.offset, &mut buffer);
@@ -74,8 +74,6 @@ pub fn list_apps() {
 bitflags! {
     ///  The flags argument to the open() system call is constructed by ORing together zero or more of the following values:
     pub struct OpenFlags: u32 {
-        /// readyonly
-        const RDONLY = 0;
         /// writeonly
         const WRONLY = 1 << 0;
         /// read and write
@@ -88,6 +86,9 @@ bitflags! {
 }
 
 impl OpenFlags {
+    /// Open file in read-only mode.
+    pub const RDONLY: Self = Self::empty();
+
     /// Do not check validity for simplicity
     /// Return (readable, writable)
     pub fn read_write(&self) -> (bool, bool) {
@@ -136,7 +137,7 @@ impl File for OSInode {
         let mut inner = self.inner.exclusive_access();
         let mut total_read_size = 0usize;
         for slice in buf.buffers.iter_mut() {
-            let read_size = inner.inode.read_at(inner.offset, *slice);
+            let read_size = inner.inode.read_at(inner.offset, slice);
             if read_size == 0 {
                 break;
             }
@@ -149,7 +150,7 @@ impl File for OSInode {
         let mut inner = self.inner.exclusive_access();
         let mut total_write_size = 0usize;
         for slice in buf.buffers.iter() {
-            let write_size = inner.inode.write_at(inner.offset, *slice);
+            let write_size = inner.inode.write_at(inner.offset, slice);
             assert_eq!(write_size, slice.len());
             inner.offset += write_size;
             total_write_size += write_size;

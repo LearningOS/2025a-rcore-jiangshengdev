@@ -37,13 +37,16 @@ bitflags! {
     /// The mode of a inode
     /// whether a directory or a file
     pub struct StatMode: u32 {
-        /// null
-        const NULL  = 0;
         /// directory
         const DIR   = 0o040000;
         /// ordinary regular file
         const FILE  = 0o100000;
     }
+}
+
+impl StatMode {
+    /// Mode field is empty.
+    pub const NONE: Self = Self::empty();
 }
 
 pub use inode::{list_apps, open_file, OSInode, OpenFlags};
