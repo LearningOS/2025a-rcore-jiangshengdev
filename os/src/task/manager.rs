@@ -21,14 +21,14 @@ impl StrideComparator {
     }
 }
 
-///A array of `TaskControlBlock` that is thread-safe
+///An array of `TaskControlBlock` that is thread-safe
 pub struct TaskManager {
     ready_queue: Vec<Arc<TaskControlBlock>>,
 }
 
 /// A simple FIFO scheduler.
 impl TaskManager {
-    ///Creat an empty TaskManager
+    ///Create an empty TaskManager
     pub fn new() -> Self {
         Self {
             ready_queue: Vec::new(),
