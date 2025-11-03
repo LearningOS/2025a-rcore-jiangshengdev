@@ -372,28 +372,19 @@ impl DiskInode {
             return;
         }
         assert_ne!(*pointer, 0);
-        // If we're shrinking everything (from 0), collect the root and all its children
         if slice.start == 0 {
             collected.push(*pointer);
-            Self::collect_tree_blocks(
-                collected,
-                *pointer,
-                0,
-                slice.start..slice.end,
-                0..depth,
-                block_device,
-            );
+        }
+        Self::collect_tree_blocks(
+            collected,
+            *pointer,
+            0,
+            slice.start..slice.end,
+            0..depth,
+            block_device,
+        );
+        if slice.start == 0 {
             *pointer = 0;
-        } else {
-            // Partial shrinking: collect only the range [slice.start, slice.end)
-            Self::collect_tree_blocks(
-                collected,
-                *pointer,
-                0,
-                slice.start..slice.end,
-                0..depth,
-                block_device,
-            );
         }
     }
 
