@@ -354,24 +354,47 @@ impl DiskInode {
         );
     }
 
-    /// Reclaim an indirect subtree covering the given number of leaves.
+    /// Reclaim an indirect subtree covering the given leaf range.
     fn shrink_indirect_level(
         pointer: &mut u32,
-        leaves: usize,
+        slice: LevelSlice,
         capacity: usize,
         depth: usize,
         collected: &mut Vec<u32>,
         block_device: &Arc<dyn BlockDevice>,
     ) {
-        debug_assert!(leaves <= capacity);
-        if leaves == 0 {
-            assert_eq!(*pointer, 0);
+        debug_assert!(slice.start <= slice.end);
+        debug_assert!(slice.end <= capacity);
+        if slice.is_empty() {
+            if slice.end > 0 {
+                assert_ne!(*pointer, 0);
+            }
             return;
         }
         assert_ne!(*pointer, 0);
-        collected.push(*pointer);
-        Self::collect_tree_blocks(collected, *pointer, 0, 0..leaves, 0..depth, block_device);
-        *pointer = 0;
+        // If we're shrinking everything (from 0), collect the root and all its children
+        if slice.start == 0 {
+            collected.push(*pointer);
+            Self::collect_tree_blocks(
+                collected,
+                *pointer,
+                0,
+                slice.start..slice.end,
+                0..depth,
+                block_device,
+            );
+            *pointer = 0;
+        } else {
+            // Partial shrinking: collect only the range [slice.start, slice.end)
+            Self::collect_tree_blocks(
+                collected,
+                *pointer,
+                0,
+                slice.start..slice.end,
+                0..depth,
+                block_device,
+            );
+        }
     }
 
     /// Number of leaves covered by one child pointer at the given depth.
@@ -526,31 +549,56 @@ impl DiskInode {
         cur_leaf
     }
 
-    /// Clear size to zero and return blocks that should be deallocated.
-    /// We will clear the block contents to zero later.
-    pub fn clear_size(&mut self, block_device: &Arc<dyn BlockDevice>) -> Vec<u32> {
-        let mut v: Vec<u32> = Vec::new();
-        let data_blocks = self.data_blocks() as usize;
-        self.size = 0;
-        let direct_end = data_blocks.min(INODE_DIRECT_COUNT);
-        for idx in 0..direct_end {
-            v.push(self.direct[idx]);
+    /// Decrease the size of current disk inode and return blocks to deallocate
+    pub fn decrease_size(
+        &mut self,
+        new_size: u32,
+        block_device: &Arc<dyn BlockDevice>,
+    ) -> Vec<u32> {
+        assert!(new_size <= self.size);
+        let prev_blocks = self.data_blocks() as usize;
+        self.size = new_size;
+        let target_blocks = self.data_blocks() as usize;
+        let mut collected: Vec<u32> = Vec::new();
+
+        // Deallocate direct blocks in reverse order
+        let direct_start = target_blocks.min(INODE_DIRECT_COUNT);
+        let direct_end = prev_blocks.min(INODE_DIRECT_COUNT);
+        for idx in direct_start..direct_end {
+            collected.push(self.direct[idx]);
             self.direct[idx] = 0;
         }
 
-        for level in LEVEL_SPECS.iter() {
-            let leaves = Self::level_usage(data_blocks, level.base, level.capacity);
-            Self::shrink_indirect_level(
-                level.pointer_mut(self),
-                leaves,
-                level.capacity,
-                level.depth,
-                &mut v,
-                block_device,
-            );
+        if prev_blocks <= DIRECT_BOUND {
+            return collected;
         }
 
-        v
+        // Deallocate indirect blocks
+        for level in LEVEL_SPECS.iter() {
+            if prev_blocks <= level.base {
+                break;
+            }
+            let slice = Self::level_range(target_blocks, prev_blocks, level.base, level.capacity);
+            Self::shrink_indirect_level(
+                level.pointer_mut(self),
+                slice,
+                level.capacity,
+                level.depth,
+                &mut collected,
+                block_device,
+            );
+            if prev_blocks <= level.upper_bound() {
+                return collected;
+            }
+        }
+        debug_assert!(prev_blocks <= LEVEL_SPECS.last().unwrap().upper_bound());
+        collected
+    }
+
+    /// Clear size to zero and return blocks that should be deallocated.
+    /// We will clear the block contents to zero later.
+    pub fn clear_size(&mut self, block_device: &Arc<dyn BlockDevice>) -> Vec<u32> {
+        self.decrease_size(0, block_device)
     }
     /// Read data from current disk inode
     pub fn read_at(
