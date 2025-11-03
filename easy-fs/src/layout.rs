@@ -2,6 +2,7 @@ use super::{get_block_cache, BlockDevice, BLOCK_SZ};
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::fmt::{Debug, Formatter, Result};
+use core::ops::Range;
 
 /// Magic number for sanity check
 const EFS_MAGIC: u32 = 0x3b800001;
@@ -85,6 +86,22 @@ pub enum DiskInodeType {
 type IndirectBlock = [u32; BLOCK_SZ / 4];
 /// A data block
 type DataBlock = [u8; BLOCK_SZ];
+/// Leaf interval within a specific indirect level.
+#[derive(Clone, Copy)]
+struct LevelSlice {
+    start: usize,
+    end: usize,
+}
+
+impl LevelSlice {
+    fn new(start: usize, end: usize) -> Self {
+        Self { start, end }
+    }
+
+    fn is_empty(&self) -> bool {
+        self.start == self.end
+    }
+}
 /// A disk inode
 #[repr(C)]
 pub struct DiskInode {
@@ -96,6 +113,95 @@ pub struct DiskInode {
     pub nlink: u32,
     type_: DiskInodeType,
 }
+
+fn access_indirect1_mut(inode: &mut DiskInode) -> &mut u32 {
+    &mut inode.indirect1
+}
+
+fn access_indirect1_ref(inode: &DiskInode) -> &u32 {
+    &inode.indirect1
+}
+
+fn access_indirect2_mut(inode: &mut DiskInode) -> &mut u32 {
+    &mut inode.indirect2
+}
+
+fn access_indirect2_ref(inode: &DiskInode) -> &u32 {
+    &inode.indirect2
+}
+
+fn access_indirect3_mut(inode: &mut DiskInode) -> &mut u32 {
+    &mut inode.indirect3
+}
+
+fn access_indirect3_ref(inode: &DiskInode) -> &u32 {
+    &inode.indirect3
+}
+
+/// Static description of an indirect level in the inode tree.
+#[derive(Clone, Copy)]
+struct LevelSpec {
+    base: usize,
+    capacity: usize,
+    depth: usize,
+    accessor_mut: fn(&mut DiskInode) -> &mut u32,
+    accessor_ref: fn(&DiskInode) -> &u32,
+}
+
+impl LevelSpec {
+    const fn new(
+        base: usize,
+        capacity: usize,
+        depth: usize,
+        accessor_mut: fn(&mut DiskInode) -> &mut u32,
+        accessor_ref: fn(&DiskInode) -> &u32,
+    ) -> Self {
+        Self {
+            base,
+            capacity,
+            depth,
+            accessor_mut,
+            accessor_ref,
+        }
+    }
+
+    fn pointer_mut<'a>(&self, inode: &'a mut DiskInode) -> &'a mut u32 {
+        (self.accessor_mut)(inode)
+    }
+
+    fn pointer_ref<'a>(&self, inode: &'a DiskInode) -> &'a u32 {
+        (self.accessor_ref)(inode)
+    }
+
+    const fn upper_bound(&self) -> usize {
+        self.base + self.capacity
+    }
+}
+
+/// Metadata for every indirect layer, ordered from shallow to deep.
+const LEVEL_SPECS: [LevelSpec; 3] = [
+    LevelSpec::new(
+        DIRECT_BOUND,
+        INODE_INDIRECT1_COUNT,
+        1,
+        access_indirect1_mut,
+        access_indirect1_ref,
+    ),
+    LevelSpec::new(
+        INDIRECT1_BOUND,
+        INODE_INDIRECT2_COUNT,
+        2,
+        access_indirect2_mut,
+        access_indirect2_ref,
+    ),
+    LevelSpec::new(
+        INDIRECT2_BOUND,
+        INODE_INDIRECT3_COUNT,
+        3,
+        access_indirect3_mut,
+        access_indirect3_ref,
+    ),
+];
 
 impl DiskInode {
     /// Initialize a disk inode, as well as all direct inodes under it
@@ -148,66 +254,156 @@ impl DiskInode {
     pub fn total_blocks(size: u32) -> u32 {
         let data_blocks = Self::_data_blocks(size) as usize;
         let mut total = data_blocks;
-        // indirect1
-        if data_blocks > INODE_DIRECT_COUNT {
-            total += 1;
-        }
-        // indirect2
-        if data_blocks > INDIRECT1_BOUND {
-            total += 1;
-            // sub indirect1
-            let level2_extra =
-                (data_blocks - INDIRECT1_BOUND + INODE_INDIRECT1_COUNT - 1) / INODE_INDIRECT1_COUNT;
-            total += level2_extra.min(INODE_INDIRECT1_COUNT);
-        }
-        // indirect3
-        if data_blocks > INDIRECT2_BOUND {
-            let remaining = data_blocks - INDIRECT2_BOUND;
-            let level2_extra = (remaining + INODE_INDIRECT2_COUNT - 1) / INODE_INDIRECT2_COUNT;
-            let level3_extra = (remaining + INODE_INDIRECT1_COUNT - 1) / INODE_INDIRECT1_COUNT;
-            total += 1 + level2_extra + level3_extra;
+        for level in LEVEL_SPECS.iter() {
+            let leaves = Self::level_usage(data_blocks, level.base, level.capacity);
+            total += Self::metadata_blocks_for(leaves, level.depth);
         }
         total as u32
     }
 
     /// Helper to build tree recursively
-    /// extend number of leaves from `src_leaf` to `dst_leaf`
+    /// extend number of leaves within `leaf_range`
     fn build_tree(
-        &self,
         blocks: &mut alloc::vec::IntoIter<u32>,
         block_id: u32,
         mut cur_leaf: usize,
-        src_leaf: usize,
-        dst_leaf: usize,
-        cur_depth: usize,
-        dst_depth: usize,
+        leaf_range: Range<usize>,
+        depth: Range<usize>,
         block_device: &Arc<dyn BlockDevice>,
     ) -> usize {
-        if cur_depth == dst_depth {
+        if depth.start == depth.end {
             return cur_leaf + 1;
         }
+        let next_depth = depth.start + 1..depth.end;
         get_block_cache(block_id as usize, Arc::clone(block_device))
             .lock()
             .modify(0, |indirect_block: &mut IndirectBlock| {
                 let mut i = 0;
-                while i < INODE_INDIRECT1_COUNT && cur_leaf < dst_leaf {
-                    if cur_leaf >= src_leaf {
+                while i < INODE_INDIRECT1_COUNT && cur_leaf < leaf_range.end {
+                    if cur_leaf >= leaf_range.start {
                         indirect_block[i] = blocks.next().unwrap();
                     }
-                    cur_leaf = self.build_tree(
+                    cur_leaf = Self::build_tree(
                         blocks,
                         indirect_block[i],
                         cur_leaf,
-                        src_leaf,
-                        dst_leaf,
-                        cur_depth + 1,
-                        dst_depth,
+                        leaf_range.clone(),
+                        next_depth.clone(),
                         block_device,
                     );
                     i += 1;
                 }
             });
         cur_leaf
+    }
+
+    /// Compute the leaf range that should be updated at a specific level.
+    fn level_range(prev: usize, target: usize, base: usize, capacity: usize) -> LevelSlice {
+        let start = prev.saturating_sub(base).min(capacity);
+        let end = target.saturating_sub(base).min(capacity);
+        LevelSlice::new(start, end)
+    }
+
+    /// Return number of leaves from `total` that belong to a level starting at `base`.
+    fn level_usage(total: usize, base: usize, capacity: usize) -> usize {
+        total.saturating_sub(base).min(capacity)
+    }
+
+    /// Expand an indirect subtree so that it covers the desired leaf range.
+    fn expand_indirect_level(
+        pointer: &mut u32,
+        slice: LevelSlice,
+        capacity: usize,
+        depth: usize,
+        blocks: &mut alloc::vec::IntoIter<u32>,
+        block_device: &Arc<dyn BlockDevice>,
+    ) {
+        debug_assert!(slice.start <= slice.end);
+        debug_assert!(slice.end <= capacity);
+        if slice.is_empty() {
+            if slice.end > 0 {
+                assert_ne!(*pointer, 0);
+            }
+            return;
+        }
+        if *pointer == 0 {
+            assert_eq!(slice.start, 0);
+            *pointer = blocks
+                .next()
+                .expect("no available block for indirect root allocation");
+        }
+        Self::build_tree(
+            blocks,
+            *pointer,
+            0,
+            slice.start..slice.end,
+            0..depth,
+            block_device,
+        );
+    }
+
+    /// Reclaim an indirect subtree covering the given number of leaves.
+    fn shrink_indirect_level(
+        pointer: &mut u32,
+        leaves: usize,
+        capacity: usize,
+        depth: usize,
+        collected: &mut Vec<u32>,
+        block_device: &Arc<dyn BlockDevice>,
+    ) {
+        debug_assert!(leaves <= capacity);
+        if leaves == 0 {
+            assert_eq!(*pointer, 0);
+            return;
+        }
+        assert_ne!(*pointer, 0);
+        collected.push(*pointer);
+        Self::collect_tree_blocks(collected, *pointer, 0, 0..leaves, 0..depth, block_device);
+        *pointer = 0;
+    }
+
+    /// Number of leaves covered by one child pointer at the given depth.
+    fn subtree_span(depth: usize) -> usize {
+        if depth == 0 {
+            1
+        } else {
+            INODE_INDIRECT1_COUNT.pow((depth - 1) as u32)
+        }
+    }
+
+    /// Traverse indirect levels to locate the data block at `offset`.
+    fn descend_indirect(
+        mut block_id: u32,
+        mut offset: usize,
+        mut depth: usize,
+        block_device: &Arc<dyn BlockDevice>,
+    ) -> u32 {
+        while depth > 0 {
+            assert_ne!(block_id, 0);
+            let span = Self::subtree_span(depth);
+            let index = offset / span;
+            offset %= span;
+            block_id = get_block_cache(block_id as usize, Arc::clone(block_device))
+                .lock()
+                .read(0, |indirect: &IndirectBlock| indirect[index]);
+            depth -= 1;
+        }
+        block_id
+    }
+
+    /// Return the number of metadata blocks needed to index `leaves` leaves.
+    fn metadata_blocks_for(leaves: usize, depth: usize) -> usize {
+        if depth == 0 || leaves == 0 {
+            return 0;
+        }
+        let mut total = 1usize;
+        let mut span = INODE_INDIRECT1_COUNT;
+        for _ in 1..depth {
+            let nodes = (leaves + span - 1) / span;
+            total += nodes;
+            span = span.saturating_mul(INODE_INDIRECT1_COUNT);
+        }
+        total
     }
     /// Get the number of data blocks that have to be allocated given the new size of data
     pub fn blocks_num_needed(&self, new_size: u32) -> u32 {
@@ -219,41 +415,15 @@ impl DiskInode {
         let inner_id = inner_id as usize;
         if inner_id < INODE_DIRECT_COUNT {
             self.direct[inner_id]
-        } else if inner_id < INDIRECT1_BOUND {
-            get_block_cache(self.indirect1 as usize, Arc::clone(block_device))
-                .lock()
-                .read(0, |indirect_block: &IndirectBlock| {
-                    indirect_block[inner_id - INODE_DIRECT_COUNT]
-                })
-        } else if inner_id < INDIRECT2_BOUND {
-            let last = inner_id - INDIRECT1_BOUND;
-            let indirect1 = get_block_cache(self.indirect2 as usize, Arc::clone(block_device))
-                .lock()
-                .read(0, |indirect2: &IndirectBlock| {
-                    indirect2[last / INODE_INDIRECT1_COUNT]
-                });
-            get_block_cache(indirect1 as usize, Arc::clone(block_device))
-                .lock()
-                .read(0, |indirect1: &IndirectBlock| {
-                    indirect1[last % INODE_INDIRECT1_COUNT]
-                })
         } else {
-            let last = inner_id - INDIRECT2_BOUND;
-            let indirect1 = get_block_cache(self.indirect3 as usize, Arc::clone(block_device))
-                .lock()
-                .read(0, |indirect3: &IndirectBlock| {
-                    indirect3[last / INODE_INDIRECT2_COUNT]
-                });
-            let indirect2 = get_block_cache(indirect1 as usize, Arc::clone(block_device))
-                .lock()
-                .read(0, |indirect2: &IndirectBlock| {
-                    indirect2[(last % INODE_INDIRECT2_COUNT) / INODE_INDIRECT1_COUNT]
-                });
-            get_block_cache(indirect2 as usize, Arc::clone(block_device))
-                .lock()
-                .read(0, |indirect1: &IndirectBlock| {
-                    indirect1[(last % INODE_INDIRECT2_COUNT) % INODE_INDIRECT1_COUNT]
-                })
+            for level in LEVEL_SPECS.iter() {
+                if inner_id < level.upper_bound() {
+                    let root = *level.pointer_ref(self);
+                    let offset = inner_id - level.base;
+                    return Self::descend_indirect(root, offset, level.depth, block_device);
+                }
+            }
+            panic!("inner_id {} out of range", inner_id);
         }
     }
     /// Inncrease the size of current disk inode
@@ -263,119 +433,67 @@ impl DiskInode {
         new_blocks: Vec<u32>,
         block_device: &Arc<dyn BlockDevice>,
     ) {
-        let mut current_blocks = self.data_blocks();
+        let prev_blocks = self.data_blocks() as usize;
         self.size = new_size;
-        let mut total_blocks = self.data_blocks();
-        let mut new_blocks = new_blocks.into_iter();
-        // fill direct
-        while current_blocks < total_blocks.min(INODE_DIRECT_COUNT as u32) {
-            self.direct[current_blocks as usize] = new_blocks.next().unwrap();
-            current_blocks += 1;
+        let target_blocks = self.data_blocks() as usize;
+        let mut blocks_iter = new_blocks.into_iter();
+
+        let direct_start = prev_blocks.min(INODE_DIRECT_COUNT);
+        let direct_end = target_blocks.min(INODE_DIRECT_COUNT);
+        for idx in direct_start..direct_end {
+            self.direct[idx] = blocks_iter.next().unwrap();
         }
-        // alloc indirect1
-        if total_blocks > INODE_DIRECT_COUNT as u32 {
-            if current_blocks == INODE_DIRECT_COUNT as u32 {
-                self.indirect1 = new_blocks.next().unwrap();
-            }
-            current_blocks -= INODE_DIRECT_COUNT as u32;
-            total_blocks -= INODE_DIRECT_COUNT as u32;
-        } else {
+        if target_blocks <= DIRECT_BOUND {
             return;
         }
-        // fill indirect1 via tree helper
-        let single_start = current_blocks.min(INODE_INDIRECT1_COUNT as u32) as usize;
-        let single_target = total_blocks.min(INODE_INDIRECT1_COUNT as u32) as usize;
-        if single_target > 0 {
-            assert!(self.indirect1 != 0);
-            self.build_tree(
-                &mut new_blocks,
-                self.indirect1,
-                0,
-                single_start,
-                single_target,
-                0,
-                1,
+        for level in LEVEL_SPECS.iter() {
+            if target_blocks <= level.base {
+                break;
+            }
+            let slice = Self::level_range(prev_blocks, target_blocks, level.base, level.capacity);
+            Self::expand_indirect_level(
+                level.pointer_mut(self),
+                slice,
+                level.capacity,
+                level.depth,
+                &mut blocks_iter,
                 block_device,
             );
-        }
-        current_blocks = current_blocks - single_start as u32 + single_target as u32;
-        // alloc indirect2
-        if total_blocks > INODE_INDIRECT1_COUNT as u32 {
-            if current_blocks == INODE_INDIRECT1_COUNT as u32 {
-                self.indirect2 = new_blocks.next().unwrap();
+            if target_blocks <= level.upper_bound() {
+                return;
             }
-            current_blocks -= INODE_INDIRECT1_COUNT as u32;
-            total_blocks -= INODE_INDIRECT1_COUNT as u32;
-        } else {
-            return;
         }
-        // fill indirect2 via tree helper
-        let double_start = current_blocks.min(INODE_INDIRECT2_COUNT as u32) as usize;
-        let double_target = total_blocks.min(INODE_INDIRECT2_COUNT as u32) as usize;
-        if double_target > 0 {
-            assert!(self.indirect2 != 0);
-            self.build_tree(
-                &mut new_blocks,
-                self.indirect2,
-                0,
-                double_start,
-                double_target,
-                0,
-                2,
-                block_device,
-            );
-        }
-        current_blocks = current_blocks - double_start as u32 + double_target as u32;
-        // alloc indirect3
-        if total_blocks > INODE_INDIRECT2_COUNT as u32 {
-            if current_blocks == INODE_INDIRECT2_COUNT as u32 {
-                self.indirect3 = new_blocks.next().unwrap();
-            }
-            current_blocks -= INODE_INDIRECT2_COUNT as u32;
-            total_blocks -= INODE_INDIRECT2_COUNT as u32;
-        } else {
-            return;
-        }
-        // fill indirect3 tree structure
-        self.build_tree(
-            &mut new_blocks,
-            self.indirect3,
-            0,
-            current_blocks as usize,
-            total_blocks as usize,
-            0,
-            3,
-            block_device,
-        );
+        debug_assert!(target_blocks <= LEVEL_SPECS.last().unwrap().upper_bound());
     }
 
     /// Helper to recycle blocks recursively
+    /// collect leaves covered by `leaf_range`
     fn collect_tree_blocks(
-        &self,
         collected: &mut Vec<u32>,
         block_id: u32,
         mut cur_leaf: usize,
-        max_leaf: usize,
-        cur_depth: usize,
-        dst_depth: usize,
+        leaf_range: Range<usize>,
+        depth: Range<usize>,
         block_device: &Arc<dyn BlockDevice>,
     ) -> usize {
-        if cur_depth == dst_depth {
+        if depth.start == depth.end {
             return cur_leaf + 1;
         }
+        let next_depth = depth.start + 1..depth.end;
         get_block_cache(block_id as usize, Arc::clone(block_device))
             .lock()
             .read(0, |indirect_block: &IndirectBlock| {
                 let mut i = 0;
-                while i < INODE_INDIRECT1_COUNT && cur_leaf < max_leaf {
-                    collected.push(indirect_block[i]);
-                    cur_leaf = self.collect_tree_blocks(
+                while i < INODE_INDIRECT1_COUNT && cur_leaf < leaf_range.end {
+                    if cur_leaf >= leaf_range.start {
+                        collected.push(indirect_block[i]);
+                    }
+                    cur_leaf = Self::collect_tree_blocks(
                         collected,
                         indirect_block[i],
                         cur_leaf,
-                        max_leaf,
-                        cur_depth + 1,
-                        dst_depth,
+                        leaf_range.clone(),
+                        next_depth.clone(),
                         block_device,
                     );
                     i += 1;
@@ -388,52 +506,26 @@ impl DiskInode {
     /// We will clear the block contents to zero later.
     pub fn clear_size(&mut self, block_device: &Arc<dyn BlockDevice>) -> Vec<u32> {
         let mut v: Vec<u32> = Vec::new();
-        let mut data_blocks = self.data_blocks() as usize;
+        let data_blocks = self.data_blocks() as usize;
         self.size = 0;
-        let direct_cnt = data_blocks.min(INODE_DIRECT_COUNT);
-        for i in 0..direct_cnt {
-            v.push(self.direct[i]);
-            self.direct[i] = 0;
+        let direct_end = data_blocks.min(INODE_DIRECT_COUNT);
+        for idx in 0..direct_end {
+            v.push(self.direct[idx]);
+            self.direct[idx] = 0;
         }
-        // indirect1 block
-        if data_blocks > INODE_DIRECT_COUNT {
-            v.push(self.indirect1);
-            data_blocks -= INODE_DIRECT_COUNT;
-        } else {
-            return v;
+
+        for level in LEVEL_SPECS.iter() {
+            let leaves = Self::level_usage(data_blocks, level.base, level.capacity);
+            Self::shrink_indirect_level(
+                level.pointer_mut(self),
+                leaves,
+                level.capacity,
+                level.depth,
+                &mut v,
+                block_device,
+            );
         }
-        // indirect1
-        let single_blocks = data_blocks.min(INODE_INDIRECT1_COUNT);
-        if single_blocks > 0 {
-            assert!(self.indirect1 != 0);
-            self.collect_tree_blocks(&mut v, self.indirect1, 0, single_blocks, 0, 1, block_device);
-        }
-        self.indirect1 = 0;
-        // indirect2 block
-        if data_blocks > INODE_INDIRECT1_COUNT {
-            v.push(self.indirect2);
-            data_blocks -= INODE_INDIRECT1_COUNT;
-        } else {
-            return v;
-        }
-        // indirect2
-        assert!(data_blocks <= INODE_INDIRECT3_COUNT);
-        let double_blocks = data_blocks.min(INODE_INDIRECT2_COUNT);
-        if double_blocks > 0 {
-            assert!(self.indirect2 != 0);
-            self.collect_tree_blocks(&mut v, self.indirect2, 0, double_blocks, 0, 2, block_device);
-        }
-        self.indirect2 = 0;
-        // indirect3 block
-        if data_blocks > INODE_INDIRECT2_COUNT {
-            v.push(self.indirect3);
-            data_blocks -= INODE_INDIRECT2_COUNT;
-        } else {
-            return v;
-        }
-        // indirect3
-        self.collect_tree_blocks(&mut v, self.indirect3, 0, data_blocks, 0, 3, block_device);
-        self.indirect3 = 0;
+
         v
     }
     /// Read data from current disk inode
