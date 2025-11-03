@@ -275,22 +275,34 @@ impl DiskInode {
             return cur_leaf + 1;
         }
         let next_depth = depth.start + 1..depth.end;
+        let depth_len = depth.end - depth.start;
+        let span = INODE_INDIRECT1_COUNT.pow(depth_len.saturating_sub(1) as u32);
         get_block_cache(block_id as usize, Arc::clone(block_device))
             .lock()
             .modify(0, |indirect_block: &mut IndirectBlock| {
                 let mut i = 0;
                 while i < INODE_INDIRECT1_COUNT && cur_leaf < leaf_range.end {
-                    if cur_leaf >= leaf_range.start {
+                    let child_start = cur_leaf;
+                    let child_end = child_start + span;
+                    if child_end <= leaf_range.start {
+                        cur_leaf = child_end;
+                        i += 1;
+                        continue;
+                    }
+                    if indirect_block[i] == 0 {
                         indirect_block[i] = blocks.next().unwrap();
                     }
                     cur_leaf = Self::build_tree(
                         blocks,
                         indirect_block[i],
-                        cur_leaf,
+                        child_start,
                         leaf_range.clone(),
                         next_depth.clone(),
                         block_device,
                     );
+                    if cur_leaf < child_end {
+                        cur_leaf = child_end;
+                    }
                     i += 1;
                 }
             });
@@ -480,22 +492,34 @@ impl DiskInode {
             return cur_leaf + 1;
         }
         let next_depth = depth.start + 1..depth.end;
+        let depth_len = depth.end - depth.start;
+        let span = INODE_INDIRECT1_COUNT.pow(depth_len.saturating_sub(1) as u32);
         get_block_cache(block_id as usize, Arc::clone(block_device))
             .lock()
             .read(0, |indirect_block: &IndirectBlock| {
                 let mut i = 0;
                 while i < INODE_INDIRECT1_COUNT && cur_leaf < leaf_range.end {
-                    if cur_leaf >= leaf_range.start {
-                        collected.push(indirect_block[i]);
+                    let child_start = cur_leaf;
+                    let child_end = child_start + span;
+                    if child_end <= leaf_range.start {
+                        cur_leaf = child_end;
+                        i += 1;
+                        continue;
                     }
-                    cur_leaf = Self::collect_tree_blocks(
-                        collected,
-                        indirect_block[i],
-                        cur_leaf,
-                        leaf_range.clone(),
-                        next_depth.clone(),
-                        block_device,
-                    );
+                    if child_start < leaf_range.end {
+                        collected.push(indirect_block[i]);
+                        cur_leaf = Self::collect_tree_blocks(
+                            collected,
+                            indirect_block[i],
+                            child_start,
+                            leaf_range.clone(),
+                            next_depth.clone(),
+                            block_device,
+                        );
+                        if cur_leaf < child_end {
+                            cur_leaf = child_end;
+                        }
+                    }
                     i += 1;
                 }
             });
