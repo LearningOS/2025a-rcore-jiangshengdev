@@ -282,18 +282,15 @@ impl DiskInode {
         } else {
             return;
         }
-        // fill indirect1 using build_tree (depth 1)
-        self.build_tree(
-            &mut new_blocks,
-            self.indirect1,
-            0,
-            current_blocks as usize,
-            total_blocks.min(INODE_INDIRECT1_COUNT as u32) as usize,
-            0,
-            1,
-            block_device,
-        );
-        current_blocks = total_blocks.min(INODE_INDIRECT1_COUNT as u32);
+        // fill indirect1
+        get_block_cache(self.indirect1 as usize, Arc::clone(block_device))
+            .lock()
+            .modify(0, |indirect1: &mut IndirectBlock| {
+                while current_blocks < total_blocks.min(INODE_INDIRECT1_COUNT as u32) {
+                    indirect1[current_blocks as usize] = new_blocks.next().unwrap();
+                    current_blocks += 1;
+                }
+            });
         // alloc indirect2
         if total_blocks > INODE_INDIRECT1_COUNT as u32 {
             if current_blocks == INODE_INDIRECT1_COUNT as u32 {
@@ -304,18 +301,39 @@ impl DiskInode {
         } else {
             return;
         }
-        // fill indirect2 using build_tree (depth 2)
-        self.build_tree(
-            &mut new_blocks,
-            self.indirect2,
-            0,
-            current_blocks as usize,
-            total_blocks.min(INODE_INDIRECT2_COUNT as u32) as usize,
-            0,
-            2,
-            block_device,
-        );
-        current_blocks = total_blocks.min(INODE_INDIRECT2_COUNT as u32);
+        // fill indirect2 from (a0, b0) -> (a1, b1)
+        let double_start = current_blocks.min(INODE_INDIRECT2_COUNT as u32);
+        let double_target = total_blocks.min(INODE_INDIRECT2_COUNT as u32);
+        let mut filled = double_start;
+        let a0 = double_start as usize / INODE_INDIRECT1_COUNT;
+        let b0 = double_start as usize % INODE_INDIRECT1_COUNT;
+        let a1 = double_target as usize / INODE_INDIRECT1_COUNT;
+        let b1 = double_target as usize % INODE_INDIRECT1_COUNT;
+        // alloc low-level indirect1
+        get_block_cache(self.indirect2 as usize, Arc::clone(block_device))
+            .lock()
+            .modify(0, |indirect2: &mut IndirectBlock| {
+                let mut a = a0;
+                let mut b = b0;
+                while (a < a1) || (a == a1 && b < b1) {
+                    if b == 0 {
+                        indirect2[a] = new_blocks.next().unwrap();
+                    }
+                    let child = indirect2[a];
+                    get_block_cache(child as usize, Arc::clone(block_device))
+                        .lock()
+                        .modify(0, |indirect1: &mut IndirectBlock| {
+                            indirect1[b] = new_blocks.next().unwrap();
+                        });
+                    filled += 1;
+                    b += 1;
+                    if b == INODE_INDIRECT1_COUNT {
+                        b = 0;
+                        a += 1;
+                    }
+                }
+            });
+        current_blocks = current_blocks - double_start + filled;
         // alloc indirect3
         if total_blocks > INODE_INDIRECT2_COUNT as u32 {
             if current_blocks == INODE_INDIRECT2_COUNT as u32 {
@@ -326,7 +344,7 @@ impl DiskInode {
         } else {
             return;
         }
-        // fill indirect3 using build_tree (depth 3)
+        // fill indirect3 tree structure
         self.build_tree(
             &mut new_blocks,
             self.indirect3,
@@ -391,19 +409,20 @@ impl DiskInode {
         if data_blocks > INODE_DIRECT_COUNT {
             v.push(self.indirect1);
             data_blocks -= INODE_DIRECT_COUNT;
+            current_blocks = 0;
         } else {
             return v;
         }
-        // indirect1 using collect_tree_blocks (depth 1)
-        self.collect_tree_blocks(
-            &mut v,
-            self.indirect1,
-            0,
-            data_blocks.min(INODE_INDIRECT1_COUNT),
-            0,
-            1,
-            block_device,
-        );
+        // indirect1
+        get_block_cache(self.indirect1 as usize, Arc::clone(block_device))
+            .lock()
+            .modify(0, |indirect1: &mut IndirectBlock| {
+                while current_blocks < data_blocks.min(INODE_INDIRECT1_COUNT) {
+                    v.push(indirect1[current_blocks]);
+                    //indirect1[current_blocks] = 0;
+                    current_blocks += 1;
+                }
+            });
         self.indirect1 = 0;
         // indirect2 block
         if data_blocks > INODE_INDIRECT1_COUNT {
@@ -412,17 +431,38 @@ impl DiskInode {
         } else {
             return v;
         }
-        // indirect2 using collect_tree_blocks (depth 2)
+        // indirect2
         assert!(data_blocks <= INODE_INDIRECT3_COUNT);
-        self.collect_tree_blocks(
-            &mut v,
-            self.indirect2,
-            0,
-            data_blocks.min(INODE_INDIRECT2_COUNT),
-            0,
-            2,
-            block_device,
-        );
+        let double_blocks = data_blocks.min(INODE_INDIRECT2_COUNT);
+        let a1 = double_blocks / INODE_INDIRECT1_COUNT;
+        let b1 = double_blocks % INODE_INDIRECT1_COUNT;
+        get_block_cache(self.indirect2 as usize, Arc::clone(block_device))
+            .lock()
+            .modify(0, |indirect2: &mut IndirectBlock| {
+                // full indirect1 blocks
+                for entry in indirect2.iter_mut().take(a1) {
+                    v.push(*entry);
+                    get_block_cache(*entry as usize, Arc::clone(block_device))
+                        .lock()
+                        .modify(0, |indirect1: &mut IndirectBlock| {
+                            for entry in indirect1.iter() {
+                                v.push(*entry);
+                            }
+                        });
+                }
+                // last indirect1 block
+                if b1 > 0 {
+                    v.push(indirect2[a1]);
+                    get_block_cache(indirect2[a1] as usize, Arc::clone(block_device))
+                        .lock()
+                        .modify(0, |indirect1: &mut IndirectBlock| {
+                            for entry in indirect1.iter().take(b1) {
+                                v.push(*entry);
+                            }
+                        });
+                    //indirect2[a1] = 0;
+                }
+            });
         self.indirect2 = 0;
         // indirect3 block
         if data_blocks > INODE_INDIRECT2_COUNT {
@@ -431,7 +471,7 @@ impl DiskInode {
         } else {
             return v;
         }
-        // indirect3 using collect_tree_blocks (depth 3)
+        // indirect3
         self.collect_tree_blocks(&mut v, self.indirect3, 0, data_blocks, 0, 3, block_device);
         self.indirect3 = 0;
         v
