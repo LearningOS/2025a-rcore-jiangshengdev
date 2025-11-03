@@ -293,7 +293,7 @@ impl DiskInode {
             1,
             block_device,
         );
-        current_blocks = current_blocks.max(total_blocks.min(INODE_INDIRECT1_COUNT as u32));
+        current_blocks = total_blocks.min(INODE_INDIRECT1_COUNT as u32);
         // alloc indirect2
         if total_blocks > INODE_INDIRECT1_COUNT as u32 {
             if current_blocks == INODE_INDIRECT1_COUNT as u32 {
@@ -315,7 +315,7 @@ impl DiskInode {
             2,
             block_device,
         );
-        current_blocks = current_blocks.max(total_blocks.min(INODE_INDIRECT2_COUNT as u32));
+        current_blocks = total_blocks.min(INODE_INDIRECT2_COUNT as u32);
         // alloc indirect3
         if total_blocks > INODE_INDIRECT2_COUNT as u32 {
             if current_blocks == INODE_INDIRECT2_COUNT as u32 {
