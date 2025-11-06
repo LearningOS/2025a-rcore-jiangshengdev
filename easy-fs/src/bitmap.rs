@@ -31,10 +31,7 @@ impl Bitmap {
     /// Allocate a block according to the bitmap info
     pub fn alloc(&self, block_device: &Arc<dyn BlockDevice>) -> Option<usize> {
         for block_id in 0..self.blocks {
-            let pos = get_block_cache(
-                block_id + self.start_block_id as usize,
-                Arc::clone(block_device),
-            )
+            let pos = get_block_cache(block_id + self.start_block_id, Arc::clone(block_device))
             .lock()
             .modify(0, |bitmap_block: &mut BitmapBlock| {
                 if let Some((bits64_pos, inner_pos)) = bitmap_block
@@ -45,7 +42,7 @@ impl Bitmap {
                 {
                     // modify cache
                     bitmap_block[bits64_pos] |= 1u64 << inner_pos;
-                    Some(block_id * BLOCK_BITS + bits64_pos * 64 + inner_pos as usize)
+                    Some(block_id * BLOCK_BITS + bits64_pos * 64 + inner_pos)
                 } else {
                     None
                 }

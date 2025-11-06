@@ -84,6 +84,12 @@ pub struct BlockCacheManager {
     queue: VecDeque<(usize, Arc<Mutex<BlockCache>>)>,
 }
 
+impl Default for BlockCacheManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl BlockCacheManager {
     /// Create a new BlockCacheManager with an empty queue (block_id, block_cache)
     pub fn new() -> Self {
@@ -128,7 +134,7 @@ impl BlockCacheManager {
 lazy_static! {
     /// BLOCK_CACHE_MANAGER: Glocal instance of BlockCacheManager.
     pub static ref BLOCK_CACHE_MANAGER: Mutex<BlockCacheManager> =
-        Mutex::new(BlockCacheManager::new());
+    Mutex::new(BlockCacheManager::new());
 }
 /// Get a block cache from the queue. according to the block_id.
 pub fn get_block_cache(
