@@ -120,11 +120,12 @@ pub fn current_kstack_top() -> usize {
 }
 
 /// Return to idle control flow for new scheduling
-pub fn schedule(switched_task_cx_ptr: *mut TaskContext) {
+///
+/// # Safety
+/// The caller must ensure that `switched_task_cx_ptr` points to writable task context memory that stays valid for the duration of the context switch.
+pub unsafe fn schedule(switched_task_cx_ptr: *mut TaskContext) {
     let mut processor = PROCESSOR.exclusive_access();
     let idle_task_cx_ptr = processor.get_idle_task_cx_ptr();
     drop(processor);
-    unsafe {
-        __switch(switched_task_cx_ptr, idle_task_cx_ptr);
-    }
+    __switch(switched_task_cx_ptr, idle_task_cx_ptr);
 }

@@ -55,7 +55,9 @@ pub fn suspend_current_and_run_next() {
     // push back to ready queue.
     add_task(task);
     // jump to scheduling cycle
-    schedule(task_cx_ptr);
+    unsafe {
+        schedule(task_cx_ptr);
+    }
 }
 
 /// Make current task blocked and switch to the next task.
@@ -65,7 +67,9 @@ pub fn block_current_and_run_next() {
     let task_cx_ptr = &mut task_inner.task_cx as *mut TaskContext;
     task_inner.task_status = TaskStatus::Blocked;
     drop(task_inner);
-    schedule(task_cx_ptr);
+    unsafe {
+        schedule(task_cx_ptr);
+    }
 }
 
 use crate::board::QEMUExit;
@@ -131,8 +135,11 @@ pub fn exit_current_and_run_next(exit_code: i32) {
         // it has to be done before we dealloc the whole memory_set
         // otherwise they will be deallocated twice
         let mut recycle_res = Vec::<TaskUserRes>::new();
-        for task in process_inner.tasks.iter().filter(|t| t.is_some()) {
-            let task = task.as_ref().unwrap();
+        for task in process_inner
+            .tasks
+            .iter()
+            .filter_map(|t| t.as_ref().map(Arc::clone))
+        {
             // if other tasks are Ready in TaskManager or waiting for a timer to be
             // expired, we should remove them.
             //
@@ -140,7 +147,7 @@ pub fn exit_current_and_run_next(exit_code: i32) {
             // are limited in a single process. Therefore, the blocked tasks are
             // removed when the PCB is deallocated.
             trace!("kernel: exit_current_and_run_next .. remove_inactive_task");
-            remove_inactive_task(Arc::clone(&task));
+            remove_inactive_task(task.clone());
             let mut task_inner = task.inner_exclusive_access();
             if let Some(res) = task_inner.res.take() {
                 recycle_res.push(res);
@@ -164,7 +171,9 @@ pub fn exit_current_and_run_next(exit_code: i32) {
     drop(process);
     // we do not have to save task context
     let mut _unused = TaskContext::zero_init();
-    schedule(&mut _unused as *mut _);
+    unsafe {
+        schedule(&mut _unused as *mut _);
+    }
 }
 
 lazy_static! {

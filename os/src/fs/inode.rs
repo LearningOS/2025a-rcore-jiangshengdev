@@ -3,6 +3,7 @@ use crate::drivers::BLOCK_DEVICE;
 use crate::mm::UserBuffer;
 use crate::sync::UPSafeCell;
 use alloc::sync::Arc;
+use alloc::vec;
 use alloc::vec::Vec;
 use bitflags::*;
 use easy_fs::{EasyFileSystem, Inode};
@@ -34,8 +35,7 @@ impl OSInode {
     pub fn read_all(&self) -> Vec<u8> {
         trace!("kernel: OSInode::read_all");
         let mut inner = self.inner.exclusive_access();
-        let mut buffer: Vec<u8> = Vec::with_capacity(512);
-        buffer.resize(512, 0);
+        let mut buffer = vec![0; 512];
         let mut v: Vec<u8> = Vec::new();
         loop {
             let len = inner.inode.read_at(inner.offset, &mut buffer);
@@ -64,12 +64,9 @@ pub fn list_apps() {
     }
     println!("**************/");
 }
-
 bitflags! {
     ///  The flags argument to the open() system call is constructed by ORing together zero or more of the following values:
     pub struct OpenFlags: u32 {
-        /// readyonly
-        const RDONLY = 0;
         /// writeonly
         const WRONLY = 1 << 0;
         /// read and write
@@ -79,6 +76,11 @@ bitflags! {
         /// truncate file size to 0
         const TRUNC = 1 << 10;
     }
+}
+
+impl OpenFlags {
+    /// read only
+    pub const RDONLY: Self = Self::empty();
 }
 
 impl OpenFlags {
@@ -134,8 +136,8 @@ impl File for OSInode {
         trace!("kernel: OSInode::read");
         let mut inner = self.inner.exclusive_access();
         let mut total_read_size = 0usize;
-        for slice in buf.buffers.iter_mut() {
-            let read_size = inner.inode.read_at(inner.offset, *slice);
+        for slice in buf.buffers.iter_mut().map(|slice| &mut **slice) {
+            let read_size = inner.inode.read_at(inner.offset, slice);
             if read_size == 0 {
                 break;
             }
@@ -149,8 +151,8 @@ impl File for OSInode {
         trace!("kernel: OSInode::write");
         let mut inner = self.inner.exclusive_access();
         let mut total_write_size = 0usize;
-        for slice in buf.buffers.iter() {
-            let write_size = inner.inode.write_at(inner.offset, *slice);
+        for slice in buf.buffers.iter().map(|slice| &**slice) {
+            let write_size = inner.inode.write_at(inner.offset, slice);
             assert_eq!(write_size, slice.len());
             inner.offset += write_size;
             total_write_size += write_size;

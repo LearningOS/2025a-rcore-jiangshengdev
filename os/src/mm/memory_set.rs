@@ -166,11 +166,11 @@ impl MemorySet {
             None,
         );
         info!("mapping memory-mapped registers");
-        for pair in MMIO {
+        for &(start, len) in MMIO {
             memory_set.push(
                 MapArea::new(
-                    (*pair).0.into(),
-                    ((*pair).0 + (*pair).1).into(),
+                    start.into(),
+                    (start + len).into(),
                     MapType::Identical,
                     MapPermission::R | MapPermission::W,
                 ),

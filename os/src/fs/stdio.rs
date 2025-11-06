@@ -51,8 +51,8 @@ impl File for Stdout {
         panic!("Cannot read from stdout!");
     }
     fn write(&self, user_buf: UserBuffer) -> usize {
-        for buffer in user_buf.buffers.iter() {
-            print!("{}", core::str::from_utf8(*buffer).unwrap());
+        for slice in user_buf.buffers.iter().map(|buffer| &**buffer) {
+            print!("{}", core::str::from_utf8(slice).unwrap());
         }
         user_buf.len()
     }
