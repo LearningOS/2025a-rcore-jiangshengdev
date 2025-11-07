@@ -2,7 +2,7 @@ use crate::sync::{Condvar, Mutex, MutexBlocking, MutexSpin, Semaphore};
 use crate::task::{block_current_and_run_next, current_process, current_task};
 use crate::timer::{add_timer, get_time_ms};
 use alloc::sync::Arc;
-/// sleep syscall
+/// sleep 系统调用
 pub fn sys_sleep(ms: usize) -> isize {
     trace!(
         "kernel:pid[{}] tid[{}] sys_sleep",
@@ -21,7 +21,7 @@ pub fn sys_sleep(ms: usize) -> isize {
     block_current_and_run_next();
     0
 }
-/// mutex create syscall
+/// 创建互斥锁的系统调用
 pub fn sys_mutex_create(blocking: bool) -> isize {
     trace!(
         "kernel:pid[{}] tid[{}] sys_mutex_create",
@@ -55,7 +55,7 @@ pub fn sys_mutex_create(blocking: bool) -> isize {
         process_inner.mutex_list.len() as isize - 1
     }
 }
-/// mutex lock syscall
+/// 互斥锁加锁系统调用
 pub fn sys_mutex_lock(mutex_id: usize) -> isize {
     trace!(
         "kernel:pid[{}] tid[{}] sys_mutex_lock",
@@ -76,7 +76,7 @@ pub fn sys_mutex_lock(mutex_id: usize) -> isize {
     mutex.lock();
     0
 }
-/// mutex unlock syscall
+/// 互斥锁解锁系统调用
 pub fn sys_mutex_unlock(mutex_id: usize) -> isize {
     trace!(
         "kernel:pid[{}] tid[{}] sys_mutex_unlock",
@@ -97,7 +97,7 @@ pub fn sys_mutex_unlock(mutex_id: usize) -> isize {
     mutex.unlock();
     0
 }
-/// semaphore create syscall
+/// 创建信号量的系统调用
 pub fn sys_semaphore_create(res_count: usize) -> isize {
     trace!(
         "kernel:pid[{}] tid[{}] sys_semaphore_create",
@@ -129,7 +129,7 @@ pub fn sys_semaphore_create(res_count: usize) -> isize {
     };
     id as isize
 }
-/// semaphore up syscall
+/// 信号量 V 操作系统调用
 pub fn sys_semaphore_up(sem_id: usize) -> isize {
     trace!(
         "kernel:pid[{}] tid[{}] sys_semaphore_up",
@@ -149,7 +149,7 @@ pub fn sys_semaphore_up(sem_id: usize) -> isize {
     sem.up();
     0
 }
-/// semaphore down syscall
+/// 信号量 P 操作系统调用
 pub fn sys_semaphore_down(sem_id: usize) -> isize {
     trace!(
         "kernel:pid[{}] tid[{}] sys_semaphore_down",
@@ -169,7 +169,7 @@ pub fn sys_semaphore_down(sem_id: usize) -> isize {
     sem.down();
     0
 }
-/// condvar create syscall
+/// 创建条件变量的系统调用
 pub fn sys_condvar_create() -> isize {
     trace!(
         "kernel:pid[{}] tid[{}] sys_condvar_create",
@@ -201,7 +201,7 @@ pub fn sys_condvar_create() -> isize {
     };
     id as isize
 }
-/// condvar signal syscall
+/// 条件变量唤醒系统调用
 pub fn sys_condvar_signal(condvar_id: usize) -> isize {
     trace!(
         "kernel:pid[{}] tid[{}] sys_condvar_signal",
@@ -221,7 +221,7 @@ pub fn sys_condvar_signal(condvar_id: usize) -> isize {
     condvar.signal();
     0
 }
-/// condvar wait syscall
+/// 条件变量等待系统调用
 pub fn sys_condvar_wait(condvar_id: usize, mutex_id: usize) -> isize {
     trace!(
         "kernel:pid[{}] tid[{}] sys_condvar_wait",
@@ -242,9 +242,9 @@ pub fn sys_condvar_wait(condvar_id: usize, mutex_id: usize) -> isize {
     condvar.wait(mutex);
     0
 }
-/// enable deadlock detection syscall
+/// 启用死锁检测的系统调用
 ///
-/// YOUR JOB: Implement deadlock detection, but might not all in this syscall
+/// TODO：实现死锁检测，但不一定全部在该系统调用中完成
 pub fn sys_enable_deadlock_detect(_enabled: usize) -> isize {
     trace!("kernel: sys_enable_deadlock_detect NOT IMPLEMENTED");
     -1

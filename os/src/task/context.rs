@@ -1,19 +1,19 @@
-//! Implementation of [`TaskContext`]
+//! [`TaskContext`] 的实现
 use crate::trap::trap_return;
 
 #[repr(C)]
-/// task context structure containing some registers
+/// 任务上下文结构，保存若干寄存器
 pub struct TaskContext {
-    /// Ret position after task switching
+    /// 任务切换后的返回地址
     ra: usize,
-    /// Stack pointer
+    /// 栈指针
     sp: usize,
-    /// s0-11 register, callee saved
+    /// s0-s11 寄存器（被调用者保存）
     s: [usize; 12],
 }
 
 impl TaskContext {
-    /// Create a new empty task context
+    /// 创建一个空的任务上下文
     pub fn zero_init() -> Self {
         Self {
             ra: 0,
@@ -21,7 +21,7 @@ impl TaskContext {
             s: [0; 12],
         }
     }
-    /// Create a new task context with a trap return addr and a kernel stack pointer
+    /// 使用 trap 返回地址与内核栈指针创建任务上下文
     pub fn goto_trap_return(kstack_ptr: usize) -> Self {
         Self {
             ra: trap_return as usize,

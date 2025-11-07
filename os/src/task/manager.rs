@@ -1,35 +1,34 @@
-//! Implementation of [`TaskManager`]
+//! [`TaskManager`] 的实现。
 //!
-//! It is only used to manage processes and schedule process based on ready queue.
-//! Other CPU process monitoring functions are in Processor.
+//! 仅负责基于就绪队列管理与调度进程，其他 CPU 进程监控相关功能由 `Processor` 提供。
 
 use super::{ProcessControlBlock, TaskControlBlock, TaskStatus};
 use crate::sync::UPSafeCell;
 use alloc::collections::{BTreeMap, VecDeque};
 use alloc::sync::Arc;
 use lazy_static::*;
-///A array of `TaskControlBlock` that is thread-safe
+/// 线程安全的 `TaskControlBlock` 队列
 pub struct TaskManager {
     ready_queue: VecDeque<Arc<TaskControlBlock>>,
 
-    /// The stopping task, leave a reference so that the kernel stack will not be recycled when switching tasks
+    /// 停止中的任务，保留引用以避免切换任务时回收其内核栈
     stop_task: Option<Arc<TaskControlBlock>>,
 }
 
-/// A simple FIFO scheduler.
+/// 简单的 FIFO 调度器。
 impl TaskManager {
-    ///Creat an empty TaskManager
+    /// 创建一个空的 `TaskManager`
     pub fn new() -> Self {
         Self {
             ready_queue: VecDeque::new(),
             stop_task: None,
         }
     }
-    /// Add process back to ready queue
+    /// 将任务重新加入就绪队列
     pub fn add(&mut self, task: Arc<TaskControlBlock>) {
         self.ready_queue.push_back(task);
     }
-    /// Take a process out of the ready queue
+    /// 从就绪队列取出一个任务
     pub fn fetch(&mut self) -> Option<Arc<TaskControlBlock>> {
         self.ready_queue.pop_front()
     }
@@ -43,31 +42,29 @@ impl TaskManager {
             self.ready_queue.remove(id);
         }
     }
-    /// Add a task to stopping task
+    /// 记录一个停止中的任务
     pub fn add_stop(&mut self, task: Arc<TaskControlBlock>) {
-        // NOTE: as the last stopping task has completely stopped (not
-        // using kernel stack any more, at least in the single-core
-        // case) so that we can simply replace it;
+        // 注意：上一条停止任务已经完全结束（至少在单核场景中不再使用内核栈），因此可以直接替换。
         self.stop_task = Some(task);
     }
 }
 
 lazy_static! {
-    /// TASK_MANAGER instance through lazy_static!
+    /// 通过 lazy_static! 创建的 TASK_MANAGER 实例
     pub static ref TASK_MANAGER: UPSafeCell<TaskManager> =
         unsafe { UPSafeCell::new(TaskManager::new()) };
-    /// PID2PCB instance (map of pid to pcb)
+    /// PID2PCB 实例（PID 到 PCB 的映射）
     pub static ref PID2PCB: UPSafeCell<BTreeMap<usize, Arc<ProcessControlBlock>>> =
         unsafe { UPSafeCell::new(BTreeMap::new()) };
 }
 
-/// Add a task to ready queue
+/// 将任务加入就绪队列
 pub fn add_task(task: Arc<TaskControlBlock>) {
     //trace!("kernel: TaskManager::add_task");
     TASK_MANAGER.exclusive_access().add(task);
 }
 
-/// Wake up a task
+/// 唤醒一个任务
 pub fn wakeup_task(task: Arc<TaskControlBlock>) {
     trace!("kernel: TaskManager::wakeup_task");
     let mut task_inner = task.inner_exclusive_access();
@@ -76,35 +73,35 @@ pub fn wakeup_task(task: Arc<TaskControlBlock>) {
     add_task(task);
 }
 
-/// Remove a task from the ready queue
+/// 从就绪队列移除任务
 pub fn remove_task(task: Arc<TaskControlBlock>) {
     //trace!("kernel: TaskManager::remove_task");
     TASK_MANAGER.exclusive_access().remove(task);
 }
 
-/// Fetch a task out of the ready queue
+/// 从就绪队列获取一个任务
 pub fn fetch_task() -> Option<Arc<TaskControlBlock>> {
     //trace!("kernel: TaskManager::fetch_task");
     TASK_MANAGER.exclusive_access().fetch()
 }
 
-/// Set a task to stop-wait status, waiting for its kernel stack out of use.
+/// 将任务置于等待停止状态，确保其内核栈彻底闲置。
 pub fn add_stopping_task(task: Arc<TaskControlBlock>) {
     TASK_MANAGER.exclusive_access().add_stop(task);
 }
 
-/// Get process by pid
+/// 根据 PID 查询进程
 pub fn pid2process(pid: usize) -> Option<Arc<ProcessControlBlock>> {
     let map = PID2PCB.exclusive_access();
     map.get(&pid).map(Arc::clone)
 }
 
-/// Insert item(pid, pcb) into PID2PCB map (called by do_fork AND ProcessControlBlock::new)
+/// 将 (pid, pcb) 插入 PID2PCB 映射（由 `do_fork` 与 `ProcessControlBlock::new` 调用）
 pub fn insert_into_pid2process(pid: usize, process: Arc<ProcessControlBlock>) {
     PID2PCB.exclusive_access().insert(pid, process);
 }
 
-/// Remove item(pid, _some_pcb) from PDI2PCB map (called by exit_current_and_run_next)
+/// 从 PID2PCB 映射中移除指定 pid（由 `exit_current_and_run_next` 调用）
 pub fn remove_from_pid2process(pid: usize) {
     let mut map = PID2PCB.exclusive_access();
     if map.remove(&pid).is_none() {

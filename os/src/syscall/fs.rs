@@ -2,7 +2,7 @@ use crate::fs::{make_pipe, open_file, OpenFlags, Stat};
 use crate::mm::{translated_byte_buffer, translated_refmut, translated_str, UserBuffer};
 use crate::task::{current_process, current_task, current_user_token};
 use alloc::sync::Arc;
-/// write syscall
+/// write 系统调用
 pub fn sys_write(fd: usize, buf: *const u8, len: usize) -> isize {
     trace!(
         "kernel:pid[{}] sys_write",
@@ -19,14 +19,14 @@ pub fn sys_write(fd: usize, buf: *const u8, len: usize) -> isize {
             return -1;
         }
         let file = file.clone();
-        // release current task TCB manually to avoid multi-borrow
+        // 手动释放当前任务的 TCB，避免出现多重借用
         drop(inner);
         file.write(UserBuffer::new(translated_byte_buffer(token, buf, len))) as isize
     } else {
         -1
     }
 }
-/// read syscall
+/// read 系统调用
 pub fn sys_read(fd: usize, buf: *const u8, len: usize) -> isize {
     trace!(
         "kernel:pid[{}] sys_read",
@@ -43,7 +43,7 @@ pub fn sys_read(fd: usize, buf: *const u8, len: usize) -> isize {
         if !file.readable() {
             return -1;
         }
-        // release current task TCB manually to avoid multi-borrow
+        // 手动释放当前任务的 TCB，避免出现多重借用
         drop(inner);
         trace!("kernel: sys_read .. file.read");
         file.read(UserBuffer::new(translated_byte_buffer(token, buf, len))) as isize
@@ -51,7 +51,7 @@ pub fn sys_read(fd: usize, buf: *const u8, len: usize) -> isize {
         -1
     }
 }
-/// open sys
+/// open 系统调用
 pub fn sys_open(path: *const u8, flags: u32) -> isize {
     trace!(
         "kernel:pid[{}] sys_open",
@@ -69,7 +69,7 @@ pub fn sys_open(path: *const u8, flags: u32) -> isize {
         -1
     }
 }
-/// close syscall
+/// close 系统调用
 pub fn sys_close(fd: usize) -> isize {
     trace!(
         "kernel:pid[{}] sys_close",
@@ -86,7 +86,7 @@ pub fn sys_close(fd: usize) -> isize {
     inner.fd_table[fd].take();
     0
 }
-/// pipe syscall
+/// pipe 系统调用
 pub fn sys_pipe(pipe: *mut usize) -> isize {
     trace!(
         "kernel:pid[{}] sys_pipe",
@@ -104,7 +104,7 @@ pub fn sys_pipe(pipe: *mut usize) -> isize {
     *translated_refmut(token, unsafe { pipe.add(1) }) = write_fd;
     0
 }
-/// dup syscall
+/// dup 系统调用
 pub fn sys_dup(fd: usize) -> isize {
     trace!(
         "kernel:pid[{}] sys_dup",
@@ -123,7 +123,7 @@ pub fn sys_dup(fd: usize) -> isize {
     new_fd as isize
 }
 
-/// YOUR JOB: Implement fstat.
+/// TODO：实现 fstat。
 pub fn sys_fstat(_fd: usize, _st: *mut Stat) -> isize {
     trace!(
         "kernel:pid[{}] sys_fstat NOT IMPLEMENTED",
@@ -132,7 +132,7 @@ pub fn sys_fstat(_fd: usize, _st: *mut Stat) -> isize {
     -1
 }
 
-/// YOUR JOB: Implement linkat.
+/// TODO：实现 linkat。
 pub fn sys_linkat(_old_name: *const u8, _new_name: *const u8) -> isize {
     trace!(
         "kernel:pid[{}] sys_linkat NOT IMPLEMENTED",
@@ -141,7 +141,7 @@ pub fn sys_linkat(_old_name: *const u8, _new_name: *const u8) -> isize {
     -1
 }
 
-/// YOUR JOB: Implement unlinkat.
+/// TODO：实现 unlinkat。
 pub fn sys_unlinkat(_name: *const u8) -> isize {
     trace!(
         "kernel:pid[{}] sys_unlinkat NOT IMPLEMENTED",

@@ -1,4 +1,4 @@
-//! Implementation of  [`ProcessControlBlock`]
+//! [`ProcessControlBlock`] 的实现。
 
 use super::id::RecycleAllocator;
 use super::manager::insert_into_pid2process;
@@ -15,49 +15,49 @@ use alloc::vec;
 use alloc::vec::Vec;
 use core::cell::RefMut;
 
-/// Process Control Block
+/// 进程控制块
 pub struct ProcessControlBlock {
-    /// immutable
+    /// 不可变部分
     pub pid: PidHandle,
-    /// mutable
+    /// 可变部分
     inner: UPSafeCell<ProcessControlBlockInner>,
 }
 
-/// Inner of Process Control Block
+/// 进程控制块的内部状态
 pub struct ProcessControlBlockInner {
-    /// is zombie?
+    /// 是否为僵尸进程
     pub is_zombie: bool,
-    /// memory set(address space)
+    /// 地址空间（内存集合）
     pub memory_set: MemorySet,
-    /// parent process
+    /// 父进程
     pub parent: Option<Weak<ProcessControlBlock>>,
-    /// children process
+    /// 子进程列表
     pub children: Vec<Arc<ProcessControlBlock>>,
-    /// exit code
+    /// 退出码
     pub exit_code: i32,
-    /// file descriptor table
+    /// 文件描述符表
     pub fd_table: Vec<Option<Arc<dyn File + Send + Sync>>>,
-    /// signal flags
+    /// 信号标志位
     pub signals: SignalFlags,
-    /// tasks(also known as threads)
+    /// 任务（线程）列表
     pub tasks: Vec<Option<Arc<TaskControlBlock>>>,
-    /// task resource allocator
+    /// 任务资源分配器
     pub task_res_allocator: RecycleAllocator,
-    /// mutex list
+    /// 互斥锁列表
     pub mutex_list: Vec<Option<Arc<dyn Mutex>>>,
-    /// semaphore list
+    /// 信号量列表
     pub semaphore_list: Vec<Option<Arc<Semaphore>>>,
-    /// condvar list
+    /// 条件变量列表
     pub condvar_list: Vec<Option<Arc<Condvar>>>,
 }
 
 impl ProcessControlBlockInner {
     #[allow(unused)]
-    /// get the address of app's page table
+    /// 获取应用页表地址
     pub fn get_user_token(&self) -> usize {
         self.memory_set.token()
     }
-    /// allocate a new file descriptor
+    /// 分配新的文件描述符
     pub fn alloc_fd(&mut self) -> usize {
         if let Some(fd) = (0..self.fd_table.len()).find(|fd| self.fd_table[*fd].is_none()) {
             fd
@@ -66,35 +66,35 @@ impl ProcessControlBlockInner {
             self.fd_table.len() - 1
         }
     }
-    /// allocate a new task id
+    /// 分配新的任务 ID
     pub fn alloc_tid(&mut self) -> usize {
         self.task_res_allocator.alloc()
     }
-    /// deallocate a task id
+    /// 回收任务 ID
     pub fn dealloc_tid(&mut self, tid: usize) {
         self.task_res_allocator.dealloc(tid)
     }
-    /// the count of tasks(threads) in this process
+    /// 当前进程中的任务（线程）数量
     pub fn thread_count(&self) -> usize {
         self.tasks.len()
     }
-    /// get a task with tid in this process
+    /// 根据 tid 获取进程内的任务
     pub fn get_task(&self, tid: usize) -> Arc<TaskControlBlock> {
         self.tasks[tid].as_ref().unwrap().clone()
     }
 }
 
 impl ProcessControlBlock {
-    /// inner_exclusive_access
+    /// 独占访问内部状态
     pub fn inner_exclusive_access(&self) -> RefMut<'_, ProcessControlBlockInner> {
         self.inner.exclusive_access()
     }
-    /// new process from elf file
+    /// 根据 ELF 文件创建新进程
     pub fn new(elf_data: &[u8]) -> Arc<Self> {
         trace!("kernel: ProcessControlBlock::new");
-        // memory_set with elf program headers/trampoline/trap context/user stack
+        // 根据 ELF 生成的内存集合，包含程序头、trampoline、trap 上下文与用户栈
         let (memory_set, ustack_base, entry_point) = MemorySet::from_elf(elf_data);
-        // allocate a pid
+        // 分配一个 PID
         let pid_handle = pid_alloc();
         let process = Arc::new(Self {
             pid: pid_handle,
@@ -106,11 +106,11 @@ impl ProcessControlBlock {
                     children: Vec::new(),
                     exit_code: 0,
                     fd_table: vec![
-                        // 0 -> stdin
+                        // 0 -> 标准输入
                         Some(Arc::new(Stdin)),
-                        // 1 -> stdout
+                        // 1 -> 标准输出
                         Some(Arc::new(Stdout)),
-                        // 2 -> stderr
+                        // 2 -> 标准错误
                         Some(Arc::new(Stdout)),
                     ],
                     signals: SignalFlags::empty(),
@@ -122,13 +122,13 @@ impl ProcessControlBlock {
                 })
             },
         });
-        // create a main thread, we should allocate ustack and trap_cx here
+        // 创建主线程，此处需分配用户栈与 trap_cx
         let task = Arc::new(TaskControlBlock::new(
             Arc::clone(&process),
             ustack_base,
             true,
         ));
-        // prepare trap_cx of main thread
+        // 准备主线程的 trap_cx
         let task_inner = task.inner_exclusive_access();
         let trap_cx = task_inner.get_trap_cx();
         let ustack_top = task_inner.res.as_ref().unwrap().ustack_top();
@@ -141,36 +141,35 @@ impl ProcessControlBlock {
             kstack_top,
             trap_handler as usize,
         );
-        // add main thread to the process
+        // 将主线程加入进程
         let mut process_inner = process.inner_exclusive_access();
         process_inner.tasks.push(Some(Arc::clone(&task)));
         drop(process_inner);
         insert_into_pid2process(process.getpid(), Arc::clone(&process));
-        // add main thread to scheduler
+        // 将主线程加入调度器
         add_task(task);
         process
     }
 
-    /// Only support processes with a single thread.
+    /// 仅支持单线程进程。
     pub fn exec(self: &Arc<Self>, elf_data: &[u8], args: Vec<String>) {
         trace!("kernel: exec");
         assert_eq!(self.inner_exclusive_access().thread_count(), 1);
-        // memory_set with elf program headers/trampoline/trap context/user stack
+        // 根据 ELF 构建新的内存集合（程序头 / trampoline / trap 上下文 / 用户栈）
         trace!("kernel: exec .. MemorySet::from_elf");
         let (memory_set, ustack_base, entry_point) = MemorySet::from_elf(elf_data);
         let new_token = memory_set.token();
-        // substitute memory_set
+        // 替换原有内存集合
         trace!("kernel: exec .. substitute memory_set");
         self.inner_exclusive_access().memory_set = memory_set;
-        // then we alloc user resource for main thread again
-        // since memory_set has been changed
+        // 由于内存集合已改变，需要重新为主线程分配用户资源
         trace!("kernel: exec .. alloc user resource for main thread again");
         let task = self.inner_exclusive_access().get_task(0);
         let mut task_inner = task.inner_exclusive_access();
         task_inner.res.as_mut().unwrap().ustack_base = ustack_base;
         task_inner.res.as_mut().unwrap().alloc_user_res();
         task_inner.trap_cx_ppn = task_inner.res.as_mut().unwrap().trap_cx_ppn();
-        // push arguments on user stack
+        // 将参数压入用户栈
         trace!("kernel: exec .. push arguments on user stack");
         let mut user_sp = task_inner.res.as_mut().unwrap().ustack_top();
         user_sp -= (args.len() + 1) * core::mem::size_of::<usize>();
@@ -194,9 +193,9 @@ impl ProcessControlBlock {
             }
             *translated_refmut(new_token, p as *mut u8) = 0;
         }
-        // make the user_sp aligned to 8B for k210 platform
+        // 对齐栈指针到 8 字节（适配 k210 平台）
         user_sp -= user_sp % core::mem::size_of::<usize>();
-        // initialize trap_cx
+        // 初始化 trap_cx
         trace!("kernel: exec .. initialize trap_cx");
         let mut trap_cx = TrapContext::app_init_context(
             entry_point,
@@ -210,16 +209,16 @@ impl ProcessControlBlock {
         *task_inner.get_trap_cx() = trap_cx;
     }
 
-    /// Only support processes with a single thread.
+    /// 仅支持单线程进程。
     pub fn fork(self: &Arc<Self>) -> Arc<Self> {
         trace!("kernel: fork");
         let mut parent = self.inner_exclusive_access();
         assert_eq!(parent.thread_count(), 1);
-        // clone parent's memory_set completely including trampoline/ustacks/trap_cxs
+        // 完整克隆父进程的内存集合（含 trampoline、用户栈、trap_cx）
         let memory_set = MemorySet::from_existed_user(&parent.memory_set);
-        // alloc a pid
+        // 分配 PID
         let pid = pid_alloc();
-        // copy fd table
+        // 拷贝文件描述符表
         let mut new_fd_table: Vec<Option<Arc<dyn File + Send + Sync>>> = Vec::new();
         for fd in parent.fd_table.iter() {
             if let Some(file) = fd {
@@ -228,7 +227,7 @@ impl ProcessControlBlock {
                 new_fd_table.push(None);
             }
         }
-        // create child process pcb
+        // 创建子进程 PCB
         let child = Arc::new(Self {
             pid,
             inner: unsafe {
@@ -248,9 +247,9 @@ impl ProcessControlBlock {
                 })
             },
         });
-        // add child
+        // 将子进程挂到父进程名下
         parent.children.push(Arc::clone(&child));
-        // create main thread of child process
+        // 为子进程创建主线程
         let task = Arc::new(TaskControlBlock::new(
             Arc::clone(&child),
             parent
@@ -260,25 +259,24 @@ impl ProcessControlBlock {
                 .as_ref()
                 .unwrap()
                 .ustack_base(),
-            // here we do not allocate trap_cx or ustack again
-            // but mention that we allocate a new kstack here
+            // 此处不重新分配 trap_cx 或用户栈，但会分配新的内核栈
             false,
         ));
-        // attach task to child process
+        // 将线程挂入子进程
         let mut child_inner = child.inner_exclusive_access();
         child_inner.tasks.push(Some(Arc::clone(&task)));
         drop(child_inner);
-        // modify kstack_top in trap_cx of this thread
+        // 更新该线程 trap_cx 中的内核栈顶指针
         let task_inner = task.inner_exclusive_access();
         let trap_cx = task_inner.get_trap_cx();
         trap_cx.kernel_sp = task.kstack.get_top();
         drop(task_inner);
         insert_into_pid2process(child.getpid(), Arc::clone(&child));
-        // add this thread to scheduler
+        // 将线程加入调度器
         add_task(task);
         child
     }
-    /// get pid
+    /// 获取 PID
     pub fn getpid(&self) -> usize {
         self.pid.0
     }

@@ -1,12 +1,12 @@
-//! Conditian variable
+//! 条件变量
 
 use crate::sync::{Mutex, UPSafeCell};
 use crate::task::{block_current_and_run_next, current_task, wakeup_task, TaskControlBlock};
 use alloc::{collections::VecDeque, sync::Arc};
 
-/// Condition variable structure
+/// 条件变量结构体
 pub struct Condvar {
-    /// Condition variable inner
+    /// 条件变量的内部状态
     pub inner: UPSafeCell<CondvarInner>,
 }
 
@@ -21,7 +21,7 @@ impl Default for Condvar {
 }
 
 impl Condvar {
-    /// Create a new condition variable
+    /// 创建一个新的条件变量
     pub fn new() -> Self {
         trace!("kernel: Condvar::new");
         Self {
@@ -33,7 +33,7 @@ impl Condvar {
         }
     }
 
-    /// Signal a task waiting on the condition variable
+    /// 唤醒一个在该条件变量上等待的任务
     pub fn signal(&self) {
         let mut inner = self.inner.exclusive_access();
         if let Some(task) = inner.wait_queue.pop_front() {
@@ -41,7 +41,7 @@ impl Condvar {
         }
     }
 
-    /// blocking current task, let it wait on the condition variable
+    /// 阻塞当前任务，使其等待在该条件变量上
     pub fn wait(&self, mutex: Arc<dyn Mutex>) {
         trace!("kernel: Condvar::wait_with_mutex");
         mutex.unlock();

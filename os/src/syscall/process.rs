@@ -15,9 +15,9 @@ pub struct TimeVal {
     pub usec: usize,
 }
 
-/// exit syscall
+/// exit 系统调用
 ///
-/// exit the current task and run the next task in task list
+/// 退出当前任务并运行任务队列中的下一个任务
 pub fn sys_exit(exit_code: i32) -> ! {
     trace!(
         "kernel:pid[{}] sys_exit",
@@ -26,13 +26,13 @@ pub fn sys_exit(exit_code: i32) -> ! {
     exit_current_and_run_next(exit_code);
     panic!("Unreachable in sys_exit!");
 }
-/// yield syscall
+/// yield 系统调用
 pub fn sys_yield() -> isize {
     //trace!("kernel: sys_yield");
     suspend_current_and_run_next();
     0
 }
-/// getpid syscall
+/// getpid 系统调用
 pub fn sys_getpid() -> isize {
     trace!(
         "kernel: sys_getpid pid:{}",
@@ -40,7 +40,7 @@ pub fn sys_getpid() -> isize {
     );
     current_task().unwrap().process.upgrade().unwrap().getpid() as isize
 }
-/// fork child process syscall
+/// fork 子进程系统调用
 pub fn sys_fork() -> isize {
     trace!(
         "kernel:pid[{}] sys_fork",
@@ -49,16 +49,15 @@ pub fn sys_fork() -> isize {
     let current_process = current_process();
     let new_process = current_process.fork();
     let new_pid = new_process.getpid();
-    // modify trap context of new_task, because it returns immediately after switching
+    // 修改新线程的 trap 上下文，因为切换后会立即返回
     let new_process_inner = new_process.inner_exclusive_access();
     let task = new_process_inner.tasks[0].as_ref().unwrap();
     let trap_cx = task.inner_exclusive_access().get_trap_cx();
-    // we do not have to move to next instruction since we have done it before
-    // for child process, fork returns 0
+    // 无需再次调整到下一条指令；对子进程而言，fork 返回 0
     trap_cx.x[10] = 0;
     new_pid as isize
 }
-/// exec syscall
+/// exec 系统调用
 pub fn sys_exec(path: *const u8, mut args: *const usize) -> isize {
     trace!(
         "kernel:pid[{}] sys_exec",
@@ -82,21 +81,20 @@ pub fn sys_exec(path: *const u8, mut args: *const usize) -> isize {
         let process = current_process();
         let argc = args_vec.len();
         process.exec(all_data.as_slice(), args_vec);
-        // return argc because cx.x[10] will be covered with it later
+        // 返回 argc，因为稍后会覆盖到 cx.x[10]
         argc as isize
     } else {
         -1
     }
 }
 
-/// waitpid syscall
+/// waitpid 系统调用
 ///
-/// If there is not a child process whose pid is same as given, return -1.
-/// Else if there is a child process but it is still running, return -2.
+/// 若不存在指定 pid 的子进程，返回 -1；若子进程仍在运行，返回 -2。
 pub fn sys_waitpid(pid: isize, exit_code_ptr: *mut i32) -> isize {
     //trace!("kernel: sys_waitpid");
     let process = current_process();
-    // find a child process
+    // 查找目标子进程
 
     let mut inner = process.inner_exclusive_access();
     if !inner
@@ -105,30 +103,30 @@ pub fn sys_waitpid(pid: isize, exit_code_ptr: *mut i32) -> isize {
         .any(|p| pid == -1 || pid as usize == p.getpid())
     {
         return -1;
-        // ---- release current PCB
+        // ---- 释放当前 PCB
     }
     let pair = inner.children.iter().enumerate().find(|(_, p)| {
-        // ++++ temporarily access child PCB exclusively
+        // ++++ 临时独占访问子进程 PCB
         p.inner_exclusive_access().is_zombie && (pid == -1 || pid as usize == p.getpid())
-        // ++++ release child PCB
+        // ++++ 释放子进程 PCB
     });
     if let Some((idx, _)) = pair {
         let child = inner.children.remove(idx);
-        // confirm that child will be deallocated after being removed from children list
+        // 确认移出子进程列表后会被释放
         assert_eq!(Arc::strong_count(&child), 1);
         let found_pid = child.getpid();
-        // ++++ temporarily access child PCB exclusively
+        // ++++ 临时独占访问子进程 PCB
         let exit_code = child.inner_exclusive_access().exit_code;
-        // ++++ release child PCB
+        // ++++ 释放子进程 PCB
         *translated_refmut(inner.memory_set.token(), exit_code_ptr) = exit_code;
         found_pid as isize
     } else {
         -2
     }
-    // ---- release current PCB automatically
+    // ---- 当前 PCB 会自动释放
 }
 
-/// kill syscall
+/// kill 系统调用
 pub fn sys_kill(pid: usize, signal: u32) -> isize {
     trace!(
         "kernel:pid[{}] sys_kill",
@@ -146,11 +144,10 @@ pub fn sys_kill(pid: usize, signal: u32) -> isize {
     }
 }
 
-/// get_time syscall
+/// get_time 系统调用
 ///
-/// YOUR JOB: get time with second and microsecond
-/// HINT: You might reimplement it with virtual memory management.
-/// HINT: What if [`TimeVal`] is splitted by two pages ?
+/// TODO：返回以秒和微秒计的时间。
+/// 提示：可以结合虚拟内存管理重新实现；若 [`TimeVal`] 跨越两个页面需如何处理？
 pub fn sys_get_time(_ts: *mut TimeVal, _tz: usize) -> isize {
     trace!(
         "kernel:pid[{}] sys_get_time NOT IMPLEMENTED",
@@ -159,9 +156,9 @@ pub fn sys_get_time(_ts: *mut TimeVal, _tz: usize) -> isize {
     -1
 }
 
-/// mmap syscall
+/// mmap 系统调用
 ///
-/// YOUR JOB: Implement mmap.
+/// TODO：实现 mmap。
 pub fn sys_mmap(_start: usize, _len: usize, _port: usize) -> isize {
     trace!(
         "kernel:pid[{}] sys_mmap NOT IMPLEMENTED",
@@ -170,9 +167,9 @@ pub fn sys_mmap(_start: usize, _len: usize, _port: usize) -> isize {
     -1
 }
 
-/// munmap syscall
+/// munmap 系统调用
 ///
-/// YOUR JOB: Implement munmap.
+/// TODO：实现 munmap。
 pub fn sys_munmap(_start: usize, _len: usize) -> isize {
     trace!(
         "kernel:pid[{}] sys_munmap NOT IMPLEMENTED",
@@ -181,7 +178,7 @@ pub fn sys_munmap(_start: usize, _len: usize) -> isize {
     -1
 }
 
-/// change data segment size
+/// 调整数据段大小
 // pub fn sys_sbrk(size: i32) -> isize {
 //     trace!("kernel:pid[{}] sys_sbrk", current_task().unwrap().process.upgrade().unwrap().getpid());
 //     if let Some(old_brk) = current_task().unwrap().change_program_brk(size) {
@@ -190,9 +187,9 @@ pub fn sys_munmap(_start: usize, _len: usize) -> isize {
 //     -1
 // }
 
-/// spawn syscall
-/// YOUR JOB: Implement spawn.
-/// HINT: fork + exec =/= spawn
+/// spawn 系统调用
+/// TODO：实现 spawn。
+/// 提示：fork + exec 不等于 spawn
 pub fn sys_spawn(_path: *const u8) -> isize {
     trace!(
         "kernel:pid[{}] sys_spawn NOT IMPLEMENTED",
@@ -201,9 +198,9 @@ pub fn sys_spawn(_path: *const u8) -> isize {
     -1
 }
 
-/// set priority syscall
+/// 设置优先级的系统调用
 ///
-/// YOUR JOB: Set task priority
+/// TODO：实现任务优先级设定
 pub fn sys_set_priority(_prio: isize) -> isize {
     trace!(
         "kernel:pid[{}] sys_set_priority NOT IMPLEMENTED",

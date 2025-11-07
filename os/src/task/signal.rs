@@ -1,25 +1,25 @@
-//! Signal flags and function for convert signal flag to integer & string
+//! 信号标志以及将信号标志转换为整数和字符串的工具函数
 
 use bitflags::*;
 
 bitflags! {
-    /// Signal flags
+    /// 信号标志位
     pub struct SignalFlags: u32 {
-        /// Interrupt
+        /// 中断
         const SIGINT    = 1 << 2;
-        /// Illegal instruction
+        /// 非法指令
         const SIGILL    = 1 << 4;
-        /// Abort
+        /// 异常终止
         const SIGABRT   = 1 << 6;
-        /// Floating point exception
+        /// 浮点异常
         const SIGFPE    = 1 << 8;
-        /// Segmentation fault
+        /// 段错误
         const SIGSEGV   = 1 << 11;
     }
 }
 
 impl SignalFlags {
-    /// convert signal flag to integer & string
+    /// 将信号标志转换为整数与字符串
     pub fn check_error(&self) -> Option<(i32, &'static str)> {
         if self.contains(Self::SIGINT) {
             Some((-2, "Killed, SIGINT=2"))

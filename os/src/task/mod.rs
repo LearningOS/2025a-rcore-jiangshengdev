@@ -1,13 +1,10 @@
-//! Implementation of process [`ProcessControlBlock`] and task(thread) [`TaskControlBlock`] management mechanism
+//! 进程 [`ProcessControlBlock`] 与任务（线程）[`TaskControlBlock`] 管理机制的实现。
 //!
-//! Here is the entry for task scheduling required by other modules
-//! (such as syscall or clock interrupt).
-//! By suspending or exiting the current task, you can
-//! modify the task state, manage the task queue through TASK_MANAGER (in task/manager.rs) ,
-//! and switch the control flow through PROCESSOR (in task/processor.rs) .
+//! 这里提供其他模块（如系统调用或时钟中断）所需的调度入口。
+//! 通过挂起或退出当前任务，可以修改任务状态，经由 `TASK_MANAGER`（位于 `task/manager.rs`）管理任务队列，
+//! 并利用 `PROCESSOR`（位于 `task/processor.rs`）完成控制流切换。
 //!
-//! Be careful when you see [`__switch`]. Control flow around this function
-//! might not be what you expect.
+//! 注意 [`__switch`] 的使用，该函数附近的控制流可能与直觉不符。
 
 mod context;
 mod id;
@@ -39,28 +36,28 @@ pub use processor::{
 pub use signal::SignalFlags;
 pub use task::{TaskControlBlock, TaskStatus};
 
-/// Make current task suspended and switch to the next task
+/// 挂起当前任务并切换到下一个任务
 pub fn suspend_current_and_run_next() {
-    // There must be an application running.
+    // 此时必定有一个应用正在运行。
     let task = take_current_task().unwrap();
 
-    // ---- access current TCB exclusively
+    // ---- 独占访问当前任务控制块
     let mut task_inner = task.inner_exclusive_access();
     let task_cx_ptr = &mut task_inner.task_cx as *mut TaskContext;
-    // Change status to Ready
+    // 将状态置为 Ready
     task_inner.task_status = TaskStatus::Ready;
     drop(task_inner);
-    // ---- release current TCB
+    // ---- 释放当前任务控制块
 
-    // push back to ready queue.
+    // 重新加入就绪队列。
     add_task(task);
-    // jump to scheduling cycle
+    // 进入调度循环
     unsafe {
         schedule(task_cx_ptr);
     }
 }
 
-/// Make current task blocked and switch to the next task.
+/// 阻塞当前任务并切换到下一个任务。
 pub fn block_current_and_run_next() {
     let task = take_current_task().unwrap();
     let mut task_inner = task.inner_exclusive_access();
@@ -74,32 +71,30 @@ pub fn block_current_and_run_next() {
 
 use crate::board::QEMUExit;
 
-/// Exit the current 'Running' task and run the next task in task list.
+/// 结束当前处于 Running 状态的任务并运行任务队列中的下一个任务。
 pub fn exit_current_and_run_next(exit_code: i32) {
     trace!(
         "kernel: pid[{}] exit_current_and_run_next",
         current_task().unwrap().process.upgrade().unwrap().getpid()
     );
-    // take from Processor
+    // 从 Processor 中取出当前任务
     let task = take_current_task().unwrap();
     let mut task_inner = task.inner_exclusive_access();
     let process = task.process.upgrade().unwrap();
     let tid = task_inner.res.as_ref().unwrap().tid;
-    // record exit code
+    // 记录退出码
     task_inner.exit_code = Some(exit_code);
     task_inner.res = None;
-    // here we do not remove the thread since we are still using the kstack
-    // it will be deallocated when sys_waittid is called
+    // 此处不移除线程，因为仍在使用其内核栈；在 sys_waittid 调用时再回收
     drop(task_inner);
 
-    // Move the task to stop-wait status, to avoid kernel stack from being freed
+    // 将任务转入等待停止状态，避免内核栈被提前回收
     if tid == 0 {
         add_stopping_task(task);
     } else {
         drop(task);
     }
-    // however, if this is the main thread of current process
-    // the process should terminate at once
+    // 但若该任务是当前进程的主线程，进程需要立刻终止
     if tid == 0 {
         let pid = process.getpid();
         if pid == IDLE_PID {
@@ -108,22 +103,22 @@ pub fn exit_current_and_run_next(exit_code: i32) {
                 exit_code
             );
             if exit_code != 0 {
-                //crate::sbi::shutdown(255); //255 == -1 for err hint
+                //crate::sbi::shutdown(255); //255 == -1 表示错误提示
                 crate::board::QEMU_EXIT_HANDLE.exit_failure();
             } else {
-                //crate::sbi::shutdown(0); //0 for success hint
+                //crate::sbi::shutdown(0); //0 表示成功提示
                 crate::board::QEMU_EXIT_HANDLE.exit_success();
             }
         }
         remove_from_pid2process(pid);
         let mut process_inner = process.inner_exclusive_access();
-        // mark this process as a zombie process
+        // 将进程标记为僵尸进程
         process_inner.is_zombie = true;
-        // record exit code of main process
+        // 记录主进程退出码
         process_inner.exit_code = exit_code;
 
         {
-            // move all child processes under init process
+            // 将所有子进程挂到 init 进程名下
             let mut initproc_inner = INITPROC.inner_exclusive_access();
             for child in process_inner.children.iter() {
                 child.inner_exclusive_access().parent = Some(Arc::downgrade(&INITPROC));
@@ -131,21 +126,17 @@ pub fn exit_current_and_run_next(exit_code: i32) {
             }
         }
 
-        // deallocate user res (including tid/trap_cx/ustack) of all threads
-        // it has to be done before we dealloc the whole memory_set
-        // otherwise they will be deallocated twice
+        // 回收所有线程的用户资源（tid/trap_cx/ustack）
+        // 必须在释放整个 memory_set 之前完成，否则会重复回收
         let mut recycle_res = Vec::<TaskUserRes>::new();
         for task in process_inner
             .tasks
             .iter()
             .filter_map(|t| t.as_ref().map(Arc::clone))
         {
-            // if other tasks are Ready in TaskManager or waiting for a timer to be
-            // expired, we should remove them.
+            // 若其他任务仍在 TaskManager 的就绪队列或等待定时器到期，需要一并移除。
             //
-            // Mention that we do not need to consider Mutex/Semaphore since they
-            // are limited in a single process. Therefore, the blocked tasks are
-            // removed when the PCB is deallocated.
+            // 不必额外处理互斥锁/信号量，因为它们仅限于单个进程，PCB 回收时会移除被阻塞的任务。
             trace!("kernel: exit_current_and_run_next .. remove_inactive_task");
             remove_inactive_task(task.clone());
             let mut task_inner = task.inner_exclusive_access();
@@ -153,23 +144,22 @@ pub fn exit_current_and_run_next(exit_code: i32) {
                 recycle_res.push(res);
             }
         }
-        // dealloc_tid and dealloc_user_res require access to PCB inner, so we
-        // need to collect those user res first, then release process_inner
-        // for now to avoid deadlock/double borrow problem.
+        // dealloc_tid 与 dealloc_user_res 需要访问 PCB 内部数据，
+        // 因此需先收集用户资源后再暂时释放 process_inner，避免死锁或重复借用。
         drop(process_inner);
         recycle_res.clear();
 
         let mut process_inner = process.inner_exclusive_access();
         process_inner.children.clear();
-        // deallocate other data in user space i.e. program code/data section
+        // 回收用户空间的其他数据（代码段 / 数据段）
         process_inner.memory_set.recycle_data_pages();
-        // drop file descriptors
+        // 关闭文件描述符
         process_inner.fd_table.clear();
-        // remove all tasks
+        // 移除所有任务
         process_inner.tasks.clear();
     }
     drop(process);
-    // we do not have to save task context
+    // 此时无需保存任务上下文
     let mut _unused = TaskContext::zero_init();
     unsafe {
         schedule(&mut _unused as *mut _);
@@ -177,10 +167,10 @@ pub fn exit_current_and_run_next(exit_code: i32) {
 }
 
 lazy_static! {
-    /// Creation of initial process
+    /// 初始进程的创建
     ///
-    /// the name "initproc" may be changed to any other app name like "usertests",
-    /// but we have user_shell, so we don't need to change it.
+    /// 名称 "initproc" 可以替换为其他应用（如 "usertests"），
+    /// 但由于存在 user_shell，因此无需修改。
     pub static ref INITPROC: Arc<ProcessControlBlock> = {
         let inode = open_file("ch8b_initproc", OpenFlags::RDONLY).unwrap();
         let v = inode.read_all();
@@ -188,26 +178,26 @@ lazy_static! {
     };
 }
 
-///Add init process to the manager
+/// 将 init 进程加入任务管理器
 pub fn add_initproc() {
     let _initproc = INITPROC.clone();
 }
 
-/// Check if the current task has any signal to handle
+/// 检查当前任务是否有待处理的信号
 pub fn check_signals_of_current() -> Option<(i32, &'static str)> {
     let process = current_process();
     let process_inner = process.inner_exclusive_access();
     process_inner.signals.check_error()
 }
 
-/// Add signal to the current task
+/// 为当前任务添加信号
 pub fn current_add_signal(signal: SignalFlags) {
     let process = current_process();
     let mut process_inner = process.inner_exclusive_access();
     process_inner.signals |= signal;
 }
 
-/// the inactive(blocked) tasks are removed when the PCB is deallocated.(called by exit_current_and_run_next)
+/// 在 PCB 回收时移除处于非活动（阻塞）状态的任务（由 `exit_current_and_run_next` 调用）
 pub fn remove_inactive_task(task: Arc<TaskControlBlock>) {
     remove_task(Arc::clone(&task));
     trace!("kernel: remove_inactive_task .. remove_timer");

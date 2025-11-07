@@ -1,37 +1,34 @@
-//! Safe Cell for uniprocessor（single cpu core）
+//! 面向单核处理器（单个 CPU 核心）的安全数据封装
 //!
-//! UPSafeCell is used to wrap a static data structure which can access safely.
+//! UPSafeCell 用于包裹静态数据结构，以确保访问安全。
 //!
-//! NOTICE: We should only use it in environment with uniprocessor（single cpu core）, and the kernel can not support task preempting in kernel mode （or trap in kernel mode）.
+//! 注意：仅应在单核（单个 CPU 核心）环境中使用，且内核在内核态下不支持任务抢占或陷入。
 
 use core::cell::{RefCell, RefMut};
 
-/// Wrap a static data structure inside it so that we are
-/// able to access it without any `unsafe`.
+/// 包裹一个静态数据结构，使我们无需编写 `unsafe` 即可访问。
 ///
-/// We should only use it in uniprocessor.
+/// 仅应在单核环境中使用。
 ///
-/// In order to get mutable reference of inner data, call
-/// `exclusive_access`.
+/// 通过调用 `exclusive_access` 获取内部数据的可变引用。
 pub struct UPSafeCell<T> {
-    /// inner data
+    /// 内部数据
     inner: RefCell<T>,
 }
 
 unsafe impl<T> Sync for UPSafeCell<T> {}
 
 impl<T> UPSafeCell<T> {
-    /// User is responsible to guarantee that inner struct is only used in
-    /// uniprocessor.
+    /// 调用者需确保内部结构仅在单核环境下使用。
     ///
     /// # Safety
-    /// Caller must ensure the protected data is only accessed on a single CPU core without preemption in kernel mode.
+    /// 调用者必须确保受保护的数据只会在单个 CPU 核心上访问，且内核态不会被抢占。
     pub unsafe fn new(value: T) -> Self {
         Self {
             inner: RefCell::new(value),
         }
     }
-    /// Panic if the data has been borrowed.
+    /// 如数据已被借用则会 panic。
     pub fn exclusive_access(&self) -> RefMut<'_, T> {
         self.inner.borrow_mut()
     }

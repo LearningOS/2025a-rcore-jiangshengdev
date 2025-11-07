@@ -1,8 +1,7 @@
-//! Implementation of [`Processor`] and Intersection of control flow
+//! [`Processor`] 的实现以及控制流的交汇点。
 //!
-//! Here, the continuous operation of user apps in CPU is maintained,
-//! the current running state of CPU is recorded,
-//! and the replacement and transfer of control flow of different applications are executed.
+//! 负责保持用户应用在 CPU 上的连续运行，记录当前 CPU 的运行状态，
+//! 并负责不同应用控制流的切换与转移。
 
 use super::__switch;
 use super::{fetch_task, TaskStatus};
@@ -12,11 +11,11 @@ use crate::trap::TrapContext;
 use alloc::sync::Arc;
 use lazy_static::*;
 
-/// Processor management structure
+/// 处理器管理结构
 pub struct Processor {
     current: Option<Arc<TaskControlBlock>>,
 
-    ///The basic control flow of each core, helping to select and switch process
+    /// 各核心的基本控制流，用于选择并切换进程
     idle_task_cx: TaskContext,
 }
 
@@ -28,17 +27,17 @@ impl Processor {
         }
     }
 
-    ///Get mutable reference to `idle_task_cx`
+    /// 获取 `idle_task_cx` 的可变引用指针
     fn get_idle_task_cx_ptr(&mut self) -> *mut TaskContext {
         &mut self.idle_task_cx as *mut _
     }
 
-    ///Get current task in moving semanteme
+    /// 以移动语义取出当前任务
     pub fn take_current(&mut self) -> Option<Arc<TaskControlBlock>> {
         self.current.take()
     }
 
-    ///Get current task in cloning semanteme
+    /// 以克隆语义获取当前任务
     pub fn current(&self) -> Option<Arc<TaskControlBlock>> {
         self.current.as_ref().map(Arc::clone)
     }
@@ -48,22 +47,22 @@ lazy_static! {
     pub static ref PROCESSOR: UPSafeCell<Processor> = unsafe { UPSafeCell::new(Processor::new()) };
 }
 
-///The main part of process execution and scheduling
-///Loop `fetch_task` to get the process that needs to run, and switch the process through `__switch`
+/// 进程执行与调度的主体逻辑
+/// 循环调用 `fetch_task` 获取待运行的任务，并通过 `__switch` 完成切换
 pub fn run_tasks() {
     loop {
         let mut processor = PROCESSOR.exclusive_access();
         if let Some(task) = fetch_task() {
             let idle_task_cx_ptr = processor.get_idle_task_cx_ptr();
-            // access coming task TCB exclusively
+            // 独占访问即将运行的任务控制块
             let mut task_inner = task.inner_exclusive_access();
             let next_task_cx_ptr = &task_inner.task_cx as *const TaskContext;
             task_inner.task_status = TaskStatus::Running;
-            // release coming task_inner manually
+            // 手动释放任务内部引用
             drop(task_inner);
-            // release coming task TCB manually
+            // 手动释放任务控制块引用
             processor.current = Some(task);
-            // release processor manually
+            // 手动释放处理器锁
             drop(processor);
             unsafe {
                 __switch(idle_task_cx_ptr, next_task_cx_ptr);
@@ -74,28 +73,28 @@ pub fn run_tasks() {
     }
 }
 
-/// Get current task through take, leaving a None in its place
+/// 以移动方式取出当前任务，并将内部状态置为 `None`
 pub fn take_current_task() -> Option<Arc<TaskControlBlock>> {
     PROCESSOR.exclusive_access().take_current()
 }
 
-/// Get a copy of the current task
+/// 克隆获取当前任务
 pub fn current_task() -> Option<Arc<TaskControlBlock>> {
     PROCESSOR.exclusive_access().current()
 }
 
-/// get current process
+/// 获取当前进程
 pub fn current_process() -> Arc<ProcessControlBlock> {
     current_task().unwrap().process.upgrade().unwrap()
 }
 
-/// Get the current user token(addr of page table)
+/// 获取当前任务的用户态页表地址
 pub fn current_user_token() -> usize {
     let task = current_task().unwrap();
     task.get_user_token()
 }
 
-/// Get the mutable reference to trap context of current task
+/// 获取当前任务 trap 上下文的可变引用
 pub fn current_trap_cx() -> &'static mut TrapContext {
     current_task()
         .unwrap()
@@ -103,7 +102,7 @@ pub fn current_trap_cx() -> &'static mut TrapContext {
         .get_trap_cx()
 }
 
-/// get the user virtual address of trap context
+/// 获取当前任务 trap 上下文的用户虚拟地址
 pub fn current_trap_cx_user_va() -> usize {
     current_task()
         .unwrap()
@@ -114,15 +113,15 @@ pub fn current_trap_cx_user_va() -> usize {
         .trap_cx_user_va()
 }
 
-/// get the top addr of kernel stack
+/// 获取当前任务内核栈顶部地址
 pub fn current_kstack_top() -> usize {
     current_task().unwrap().kstack.get_top()
 }
 
-/// Return to idle control flow for new scheduling
+/// 返回空闲控制流以执行新的调度循环。
 ///
 /// # Safety
-/// The caller must ensure that `switched_task_cx_ptr` points to writable task context memory that stays valid for the duration of the context switch.
+/// 调用方必须确保 `switched_task_cx_ptr` 指向的任务上下文内存在整个切换期间保持可写且有效。
 pub unsafe fn schedule(switched_task_cx_ptr: *mut TaskContext) {
     let mut processor = PROCESSOR.exclusive_access();
     let idle_task_cx_ptr = processor.get_idle_task_cx_ptr();

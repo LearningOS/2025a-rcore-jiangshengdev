@@ -1,12 +1,12 @@
-//! Semaphore
+//! 信号量
 
 use crate::sync::UPSafeCell;
 use crate::task::{block_current_and_run_next, current_task, wakeup_task, TaskControlBlock};
 use alloc::{collections::VecDeque, sync::Arc};
 
-/// semaphore structure
+/// 信号量结构体
 pub struct Semaphore {
-    /// semaphore inner
+    /// 信号量内部状态
     pub inner: UPSafeCell<SemaphoreInner>,
 }
 
@@ -16,7 +16,7 @@ pub struct SemaphoreInner {
 }
 
 impl Semaphore {
-    /// Create a new semaphore
+    /// 创建一个新的信号量
     pub fn new(res_count: usize) -> Self {
         trace!("kernel: Semaphore::new");
         Self {
@@ -29,7 +29,7 @@ impl Semaphore {
         }
     }
 
-    /// up operation of semaphore
+    /// 执行信号量的 V 操作
     pub fn up(&self) {
         trace!("kernel: Semaphore::up");
         let mut inner = self.inner.exclusive_access();
@@ -41,7 +41,7 @@ impl Semaphore {
         }
     }
 
-    /// down operation of semaphore
+    /// 执行信号量的 P 操作
     pub fn down(&self) {
         trace!("kernel: Semaphore::down");
         let mut inner = self.inner.exclusive_access();

@@ -1,4 +1,4 @@
-//! Allocator for pid, task user resource, kernel stack using a simple recycle strategy.
+//! 通过简单回收策略实现 PID、任务用户资源与内核栈的分配。
 
 use super::ProcessControlBlock;
 use crate::config::{KERNEL_STACK_SIZE, PAGE_SIZE, TRAMPOLINE, TRAP_CONTEXT_BASE, USER_STACK_SIZE};
@@ -10,7 +10,7 @@ use alloc::{
 };
 use lazy_static::*;
 
-/// Allocator with a simple recycle strategy
+/// 采用简单回收策略的分配器
 pub struct RecycleAllocator {
     current: usize,
     recycled: Vec<usize>,
@@ -23,14 +23,14 @@ impl Default for RecycleAllocator {
 }
 
 impl RecycleAllocator {
-    /// Create a new allocator
+    /// 创建一个新的分配器
     pub fn new() -> Self {
         RecycleAllocator {
             current: 0,
             recycled: Vec::new(),
         }
     }
-    /// allocate a new item
+    /// 分配一个新的条目
     pub fn alloc(&mut self) -> usize {
         if let Some(id) = self.recycled.pop() {
             id
@@ -39,7 +39,7 @@ impl RecycleAllocator {
             self.current - 1
         }
     }
-    /// deallocate an item
+    /// 回收一个条目
     pub fn dealloc(&mut self, id: usize) {
         assert!(id < self.current);
         assert!(
@@ -52,21 +52,21 @@ impl RecycleAllocator {
 }
 
 lazy_static! {
-    /// Glocal allocator for pid
+    /// 全局 PID 分配器
     static ref PID_ALLOCATOR: UPSafeCell<RecycleAllocator> =
         unsafe { UPSafeCell::new(RecycleAllocator::new()) };
-    /// Global allocator for kernel stack
+    /// 全局内核栈分配器
     static ref KSTACK_ALLOCATOR: UPSafeCell<RecycleAllocator> =
         unsafe { UPSafeCell::new(RecycleAllocator::new()) };
 }
 
-/// The idle task's pid is 0
+/// 空闲任务的 PID 固定为 0
 pub const IDLE_PID: usize = 0;
 
-/// A handle to a pid
+/// PID 句柄
 pub struct PidHandle(pub usize);
 
-/// Allocate a pid for a process
+/// 为进程分配 PID
 pub fn pid_alloc() -> PidHandle {
     PidHandle(PID_ALLOCATOR.exclusive_access().alloc())
 }
@@ -78,17 +78,17 @@ impl Drop for PidHandle {
     }
 }
 
-/// Return (bottom, top) of a kernel stack in kernel space.
+/// 返回内核空间某个内核栈的（底部，顶部）地址。
 pub fn kernel_stack_position(kstack_id: usize) -> (usize, usize) {
     let top = TRAMPOLINE - kstack_id * (KERNEL_STACK_SIZE + PAGE_SIZE);
     let bottom = top - KERNEL_STACK_SIZE;
     (bottom, top)
 }
 
-/// Kernel stack for a task
+/// 任务对应的内核栈
 pub struct KernelStack(pub usize);
 
-/// Allocate a kernel stack for a task
+/// 为任务分配内核栈
 pub fn kstack_alloc() -> KernelStack {
     let kstack_id = KSTACK_ALLOCATOR.exclusive_access().alloc();
     let (kstack_bottom, kstack_top) = kernel_stack_position(kstack_id);
@@ -112,7 +112,7 @@ impl Drop for KernelStack {
 }
 
 impl KernelStack {
-    /// Push a variable of type T into the top of the KernelStack and return its raw pointer
+    /// 将类型为 T 的变量压入内核栈顶并返回其裸指针
     #[allow(unused)]
     pub fn push_on_top<T>(&self, value: T) -> *mut T
     where
@@ -125,33 +125,33 @@ impl KernelStack {
         }
         ptr_mut
     }
-    /// return the top of the kernel stack
+    /// 返回内核栈顶部地址
     pub fn get_top(&self) -> usize {
         let (_, kernel_stack_top) = kernel_stack_position(self.0);
         kernel_stack_top
     }
 }
 
-/// User Resource for a task
+/// 任务的用户态资源
 pub struct TaskUserRes {
-    /// task id
+    /// 任务 ID
     pub tid: usize,
-    /// user stack base
+    /// 用户栈基址
     pub ustack_base: usize,
-    /// process belongs to
+    /// 所属进程
     pub process: Weak<ProcessControlBlock>,
 }
-/// Return the bottom addr (low addr) of the trap context for a task
+/// 返回任务陷阱上下文的低地址（底部）
 fn trap_cx_bottom_from_tid(tid: usize) -> usize {
     TRAP_CONTEXT_BASE - tid * PAGE_SIZE
 }
-/// Return the bottom addr (high addr) of the user stack for a task
+/// 返回任务用户栈的底部地址（高地址）
 fn ustack_bottom_from_tid(ustack_base: usize, tid: usize) -> usize {
     ustack_base + tid * (PAGE_SIZE + USER_STACK_SIZE)
 }
 
 impl TaskUserRes {
-    /// Create a new TaskUserRes (Task User Resource)
+    /// 创建新的 TaskUserRes（任务用户资源）
     pub fn new(
         process: Arc<ProcessControlBlock>,
         ustack_base: usize,
@@ -168,11 +168,11 @@ impl TaskUserRes {
         }
         task_user_res
     }
-    /// Allocate user resource for a task
+    /// 为任务分配用户态资源
     pub fn alloc_user_res(&self) {
         let process = self.process.upgrade().unwrap();
         let mut process_inner = process.inner_exclusive_access();
-        // alloc user stack
+        // 分配用户栈
         let ustack_bottom = ustack_bottom_from_tid(self.ustack_base, self.tid);
         let ustack_top = ustack_bottom + USER_STACK_SIZE;
         process_inner.memory_set.insert_framed_area(
@@ -180,7 +180,7 @@ impl TaskUserRes {
             ustack_top.into(),
             MapPermission::R | MapPermission::W | MapPermission::U,
         );
-        // alloc trap_cx
+        // 分配 trap_cx
         let trap_cx_bottom = trap_cx_bottom_from_tid(self.tid);
         let trap_cx_top = trap_cx_bottom + PAGE_SIZE;
         process_inner.memory_set.insert_framed_area(
@@ -189,17 +189,17 @@ impl TaskUserRes {
             MapPermission::R | MapPermission::W,
         );
     }
-    /// Deallocate user resource for a task
+    /// 回收任务的用户态资源
     fn dealloc_user_res(&self) {
-        // dealloc tid
+        // 回收 tid
         let process = self.process.upgrade().unwrap();
         let mut process_inner = process.inner_exclusive_access();
-        // dealloc ustack manually
+        // 手动回收用户栈
         let ustack_bottom_va: VirtAddr = ustack_bottom_from_tid(self.ustack_base, self.tid).into();
         process_inner
             .memory_set
             .remove_area_with_start_vpn(ustack_bottom_va.into());
-        // dealloc trap_cx manually
+        // 手动回收 trap_cx
         let trap_cx_bottom_va: VirtAddr = trap_cx_bottom_from_tid(self.tid).into();
         process_inner
             .memory_set
@@ -207,7 +207,7 @@ impl TaskUserRes {
     }
 
     #[allow(unused)]
-    /// alloc task id
+    /// 分配任务 ID
     pub fn alloc_tid(&mut self) {
         self.tid = self
             .process
@@ -216,17 +216,17 @@ impl TaskUserRes {
             .inner_exclusive_access()
             .alloc_tid();
     }
-    /// dealloc task id
+    /// 回收任务 ID
     pub fn dealloc_tid(&self) {
         let process = self.process.upgrade().unwrap();
         let mut process_inner = process.inner_exclusive_access();
         process_inner.dealloc_tid(self.tid);
     }
-    /// The bottom usr vaddr (low addr) of the trap context for a task with tid
+    /// 返回指定 tid 任务陷阱上下文的用户虚拟地址（底部）
     pub fn trap_cx_user_va(&self) -> usize {
         trap_cx_bottom_from_tid(self.tid)
     }
-    /// The physical page number(ppn) of the trap context for a task with tid
+    /// 返回指定 tid 任务陷阱上下文所在的物理页号
     pub fn trap_cx_ppn(&self) -> PhysPageNum {
         let process = self.process.upgrade().unwrap();
         let process_inner = process.inner_exclusive_access();
@@ -237,11 +237,11 @@ impl TaskUserRes {
             .unwrap()
             .ppn()
     }
-    /// the bottom addr (low addr) of the user stack for a task
+    /// 返回任务用户栈的底部地址
     pub fn ustack_base(&self) -> usize {
         self.ustack_base
     }
-    /// the top addr (high addr) of the user stack for a task
+    /// 返回任务用户栈的顶部地址
     pub fn ustack_top(&self) -> usize {
         ustack_bottom_from_tid(self.ustack_base, self.tid) + USER_STACK_SIZE
     }

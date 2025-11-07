@@ -1,4 +1,4 @@
-//! Types related to task management & Functions for completely changing TCB
+//! 任务管理相关类型与用于切换 TCB 的函数。
 
 use super::id::TaskUserRes;
 use super::{kstack_alloc, KernelStack, ProcessControlBlock, TaskContext};
@@ -7,22 +7,22 @@ use crate::{mm::PhysPageNum, sync::UPSafeCell};
 use alloc::sync::{Arc, Weak};
 use core::cell::RefMut;
 
-/// Task control block structure
+/// 任务控制块结构体
 pub struct TaskControlBlock {
-    /// immutable
+    /// 不可变字段
     pub process: Weak<ProcessControlBlock>,
-    /// Kernel stack corresponding to PID
+    /// 与 PID 对应的内核栈
     pub kstack: KernelStack,
-    /// mutable
+    /// 可变字段
     inner: UPSafeCell<TaskControlBlockInner>,
 }
 
 impl TaskControlBlock {
-    /// Get the mutable reference of the inner TCB
+    /// 获取内部 TCB 的可变引用
     pub fn inner_exclusive_access(&self) -> RefMut<'_, TaskControlBlockInner> {
         self.inner.exclusive_access()
     }
-    /// Get the address of app's page table
+    /// 获取应用页表地址
     pub fn get_user_token(&self) -> usize {
         let process = self.process.upgrade().unwrap();
         let inner = process.inner_exclusive_access();
@@ -32,14 +32,14 @@ impl TaskControlBlock {
 
 pub struct TaskControlBlockInner {
     pub res: Option<TaskUserRes>,
-    /// The physical page number of the frame where the trap context is placed
+    /// 存放 trap 上下文的物理页号
     pub trap_cx_ppn: PhysPageNum,
-    /// Save task context
+    /// 保存任务上下文
     pub task_cx: TaskContext,
 
-    /// Maintain the execution status of the current process
+    /// 维护当前任务的运行状态
     pub task_status: TaskStatus,
-    /// It is set when active exit or execution error occurs
+    /// 主动退出或执行错误时记录退出码
     pub exit_code: Option<i32>,
 }
 
@@ -55,7 +55,7 @@ impl TaskControlBlockInner {
 }
 
 impl TaskControlBlock {
-    /// Create a new task
+    /// 创建新任务
     pub fn new(
         process: Arc<ProcessControlBlock>,
         ustack_base: usize,
@@ -82,12 +82,12 @@ impl TaskControlBlock {
 }
 
 #[derive(Copy, Clone, PartialEq)]
-/// The execution status of the current process
+/// 任务的执行状态
 pub enum TaskStatus {
-    /// ready to run
+    /// 就绪
     Ready,
-    /// running
+    /// 运行中
     Running,
-    /// blocked
+    /// 阻塞
     Blocked,
 }

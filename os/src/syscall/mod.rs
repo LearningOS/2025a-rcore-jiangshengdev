@@ -1,102 +1,97 @@
-//! Implementation of syscalls
+//! 系统调用的实现。
 //!
-//! The single entry point to all system calls, [`syscall()`], is called
-//! whenever userspace wishes to perform a system call using the `ecall`
-//! instruction. In this case, the processor raises an 'Environment call from
-//! U-mode' exception, which is handled as one of the cases in
-//! [`crate::trap::trap_handler`].
+//! 所有系统调用的唯一入口是 [`syscall()`]，当用户态通过 `ecall` 指令发起系统调用时会触发该函数。
+//! 此时处理器会产生“U 模式环境调用”异常，由 [`crate::trap::trap_handler`] 统一处理。
 //!
-//! For clarity, each single syscall is implemented as its own function, named
-//! `sys_` then the name of the syscall. You can find functions like this in
-//! submodules, and you should also implement syscalls this way.
+//! 为了清晰起见，每个系统调用都单独实现为以 `sys_` 开头的函数，相应实现位于各子模块中，新的系统调用也应遵循此约定。
 
-/// openat syscall
+/// openat 系统调用
 pub const SYSCALL_OPENAT: usize = 56;
-/// close syscall
+/// close 系统调用
 pub const SYSCALL_CLOSE: usize = 57;
-/// read syscall
+/// read 系统调用
 pub const SYSCALL_READ: usize = 63;
-/// write syscall
+/// write 系统调用
 pub const SYSCALL_WRITE: usize = 64;
-/// unlinkat syscall
+/// unlinkat 系统调用
 pub const SYSCALL_UNLINKAT: usize = 35;
-/// linkat syscall
+/// linkat 系统调用
 pub const SYSCALL_LINKAT: usize = 37;
-/// fstat syscall
+/// fstat 系统调用
 pub const SYSCALL_FSTAT: usize = 80;
-/// exit syscall
+/// exit 系统调用
 pub const SYSCALL_EXIT: usize = 93;
-/// sleep syscall
+/// sleep 系统调用
 pub const SYSCALL_SLEEP: usize = 101;
-/// yield syscall
+/// yield 系统调用
 pub const SYSCALL_YIELD: usize = 124;
-/// kill syscall
+/// kill 系统调用
 pub const SYSCALL_KILL: usize = 129;
 /*
-/// sigaction syscall
+/// sigaction 系统调用
 pub const SYSCALL_SIGACTION: usize = 134;
-/// sigprocmask syscall
+/// sigprocmask 系统调用
 pub const SYSCALL_SIGPROCMASK: usize = 135;
-/// sigreturn syscall
+/// sigreturn 系统调用
 pub const SYSCALL_SIGRETURN: usize = 139;
 */
-/// gettimeofday syscall
+/// gettimeofday 系统调用
 pub const SYSCALL_GETTIMEOFDAY: usize = 169;
-/// getpid syscall
+/// getpid 系统调用
 pub const SYSCALL_GETPID: usize = 172;
-/// gettid syscall
+/// gettid 系统调用
 pub const SYSCALL_GETTID: usize = 178;
-/// fork syscall
+/// fork 系统调用
 pub const SYSCALL_FORK: usize = 220;
-/// exec syscall
+/// exec 系统调用
 pub const SYSCALL_EXEC: usize = 221;
-/// waitpid syscall
+/// waitpid 系统调用
 pub const SYSCALL_WAITPID: usize = 260;
-/// set priority syscall
+/// 设置优先级系统调用
 pub const SYSCALL_SET_PRIORITY: usize = 140;
 /*
-/// sbrk syscall
+/// sbrk 系统调用
 pub const SYSCALL_SBRK: usize = 214;
 */
-/// munmap syscall
+/// munmap 系统调用
 pub const SYSCALL_MUNMAP: usize = 215;
-/// mmap syscall
+/// mmap 系统调用
 pub const SYSCALL_MMAP: usize = 222;
-/// spawn syscall
+/// spawn 系统调用
 pub const SYSCALL_SPAWN: usize = 400;
 /*
-/// mail read syscall
+/// mail read 系统调用
 pub const SYSCALL_MAIL_READ: usize = 401;
-/// mail write syscall
+/// mail write 系统调用
 pub const SYSCALL_MAIL_WRITE: usize = 402;
 */
-/// dup syscall
+/// dup 系统调用
 pub const SYSCALL_DUP: usize = 24;
-/// pipe syscall
+/// pipe 系统调用
 pub const SYSCALL_PIPE: usize = 59;
-/// thread_create syscall
+/// thread_create 系统调用
 pub const SYSCALL_THREAD_CREATE: usize = 460;
-/// waittid syscall
+/// waittid 系统调用
 pub const SYSCALL_WAITTID: usize = 462;
-/// mutex_create syscall
+/// mutex_create 系统调用
 pub const SYSCALL_MUTEX_CREATE: usize = 463;
-/// mutex_lock syscall
+/// mutex_lock 系统调用
 pub const SYSCALL_MUTEX_LOCK: usize = 464;
-/// mutex_unlock syscall
+/// mutex_unlock 系统调用
 pub const SYSCALL_MUTEX_UNLOCK: usize = 466;
-/// semaphore_create syscall
+/// semaphore_create 系统调用
 pub const SYSCALL_SEMAPHORE_CREATE: usize = 467;
-/// semaphore_up syscall
+/// semaphore_up 系统调用
 pub const SYSCALL_SEMAPHORE_UP: usize = 468;
-/// enable deadlock detect syscall
+/// 启用死锁检测系统调用
 pub const SYSCALL_ENABLE_DEADLOCK_DETECT: usize = 469;
-/// semaphore_down syscall
+/// semaphore_down 系统调用
 pub const SYSCALL_SEMAPHORE_DOWN: usize = 470;
-/// condvar_create syscall
+/// condvar_create 系统调用
 pub const SYSCALL_CONDVAR_CREATE: usize = 471;
-/// condvar_signal syscall
+/// condvar_signal 系统调用
 pub const SYSCALL_CONDVAR_SIGNAL: usize = 472;
-/// condvar_wait syscallca
+/// condvar_wait 系统调用
 pub const SYSCALL_CONDVAR_WAIT: usize = 473;
 
 mod fs;
@@ -111,7 +106,7 @@ use thread::*;
 
 use crate::fs::Stat;
 
-/// handle syscall exception with `syscall_id` and other arguments
+/// 根据 `syscall_id` 及其参数处理系统调用异常
 pub fn syscall(syscall_id: usize, args: [usize; 4]) -> isize {
     match syscall_id {
         SYSCALL_DUP => sys_dup(args[0]),

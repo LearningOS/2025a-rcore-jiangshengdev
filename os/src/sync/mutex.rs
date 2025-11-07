@@ -1,4 +1,4 @@
-//! Mutex (spin-like and blocking(sleep))
+//! 互斥锁（自旋与阻塞）
 
 use super::UPSafeCell;
 use crate::task::TaskControlBlock;
@@ -6,15 +6,15 @@ use crate::task::{block_current_and_run_next, suspend_current_and_run_next};
 use crate::task::{current_task, wakeup_task};
 use alloc::{collections::VecDeque, sync::Arc};
 
-/// Mutex trait
+/// 互斥锁特征
 pub trait Mutex: Sync + Send {
-    /// Lock the mutex
+    /// 加锁
     fn lock(&self);
-    /// Unlock the mutex
+    /// 解锁
     fn unlock(&self);
 }
 
-/// Spinlock Mutex struct
+/// 自旋互斥锁结构体
 pub struct MutexSpin {
     locked: UPSafeCell<bool>,
 }
@@ -26,7 +26,7 @@ impl Default for MutexSpin {
 }
 
 impl MutexSpin {
-    /// Create a new spinlock mutex
+    /// 创建一个新的自旋互斥锁
     pub fn new() -> Self {
         Self {
             locked: unsafe { UPSafeCell::new(false) },
@@ -35,7 +35,7 @@ impl MutexSpin {
 }
 
 impl Mutex for MutexSpin {
-    /// Lock the spinlock mutex
+    /// 为自旋互斥锁加锁
     fn lock(&self) {
         trace!("kernel: MutexSpin::lock");
         loop {
@@ -58,7 +58,7 @@ impl Mutex for MutexSpin {
     }
 }
 
-/// Blocking Mutex struct
+/// 阻塞互斥锁结构体
 pub struct MutexBlocking {
     inner: UPSafeCell<MutexBlockingInner>,
 }
@@ -75,7 +75,7 @@ impl Default for MutexBlocking {
 }
 
 impl MutexBlocking {
-    /// Create a new blocking mutex
+    /// 创建一个新的阻塞互斥锁
     pub fn new() -> Self {
         trace!("kernel: MutexBlocking::new");
         Self {
@@ -90,7 +90,7 @@ impl MutexBlocking {
 }
 
 impl Mutex for MutexBlocking {
-    /// lock the blocking mutex
+    /// 为阻塞互斥锁加锁
     fn lock(&self) {
         trace!("kernel: MutexBlocking::lock");
         let mut mutex_inner = self.inner.exclusive_access();
@@ -103,7 +103,7 @@ impl Mutex for MutexBlocking {
         }
     }
 
-    /// unlock the blocking mutex
+    /// 为阻塞互斥锁解锁
     fn unlock(&self) {
         trace!("kernel: MutexBlocking::unlock");
         let mut mutex_inner = self.inner.exclusive_access();
