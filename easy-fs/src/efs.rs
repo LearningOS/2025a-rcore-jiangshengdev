@@ -8,6 +8,7 @@ use super::{
     SuperBlock,
 };
 use crate::BLOCK_SZ;
+use core::ptr;
 use alloc::sync::Arc;
 use spin::Mutex;
 
@@ -60,8 +61,8 @@ impl EasyFileSystem {
             get_block_cache(i as usize, Arc::clone(&block_device))
                 .lock()
                 .modify(0, |data_block: &mut DataBlock| {
-                    for byte in data_block.iter_mut() {
-                        *byte = 0;
+                    unsafe {
+                        ptr::write_bytes(data_block.as_mut_ptr(), 0, data_block.len());
                     }
                 });
         }
@@ -148,9 +149,9 @@ impl EasyFileSystem {
         get_block_cache(block_id as usize, Arc::clone(&self.block_device))
             .lock()
             .modify(0, |data_block: &mut DataBlock| {
-                data_block.iter_mut().for_each(|p| {
-                    *p = 0;
-                })
+                unsafe {
+                    ptr::write_bytes(data_block.as_mut_ptr(), 0, data_block.len());
+                }
             });
         self.data_bitmap.dealloc(
             &self.block_device,

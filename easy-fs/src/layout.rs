@@ -12,6 +12,7 @@ use super::{get_block_cache, BlockDevice, BLOCK_SZ};
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::fmt::{Debug, Formatter, Result};
+use core::ptr;
 
 const EFS_MAGIC: u32 = 0x3b800001;
 const INODE_DIRECT_COUNT: usize = 28;
@@ -108,7 +109,9 @@ impl DiskInode {
     /// indirect1 and indirect2 block are allocated only when they are needed.
     pub fn initialize(&mut self, type_: DiskInodeType) {
         self.size = 0;
-        self.direct.iter_mut().for_each(|v| *v = 0);
+        unsafe {
+            ptr::write_bytes(self.direct.as_mut_ptr(), 0, self.direct.len());
+        }
         self.indirect1 = 0;
         self.indirect2 = 0;
         self.type_ = type_;

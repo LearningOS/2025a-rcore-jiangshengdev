@@ -3,6 +3,7 @@
 //! There are two different types of [`Bitmap`] in the easy-fs layout that manage inodes and blocks, respectively. Each bitmap consists of several blocks, each of which is 512 bytes, or 4096 bits. Each bit represents the allocation status of an inode/data block, 0 means unallocated, and 1 means allocated. What the bitmap does is allocate and de-allocate inodes/data blocks via bit-based allocation (looking for a bit of 0 and setting it to 1) and de-allocation (clearing the bit).
 use super::{get_block_cache, BlockDevice, BLOCK_SZ};
 use alloc::sync::Arc;
+use core::sync::atomic::{AtomicUsize, Ordering};
 /// A bitmap block
 type BitmapBlock = [u64; 64];
 /// Number of bits in a block
@@ -11,6 +12,7 @@ const BLOCK_BITS: usize = BLOCK_SZ * 8;
 pub struct Bitmap {
     start_block_id: usize,
     blocks: usize,
+    next_hint: AtomicUsize,
 }
 
 /// Decompose bits into (block_pos, bits64_pos, inner_pos)
@@ -26,11 +28,14 @@ impl Bitmap {
         Self {
             start_block_id,
             blocks,
+            next_hint: AtomicUsize::new(0),
         }
     }
     /// Allocate a block according to the bitmap info
     pub fn alloc(&self, block_device: &Arc<dyn BlockDevice>) -> Option<usize> {
-        for block_id in 0..self.blocks {
+        let start = self.next_hint.load(Ordering::Relaxed) % self.blocks;
+        for offset in 0..self.blocks {
+            let block_id = (start + offset) % self.blocks;
             let pos = get_block_cache(block_id + self.start_block_id, Arc::clone(block_device))
                 .lock()
                 .modify(0, |bitmap_block: &mut BitmapBlock| {
@@ -47,8 +52,10 @@ impl Bitmap {
                         None
                     }
                 });
-            if pos.is_some() {
-                return pos;
+            if let Some(bit_pos) = pos {
+                let next = (block_id + 1) % self.blocks;
+                self.next_hint.store(next, Ordering::Relaxed);
+                return Some(bit_pos);
             }
         }
         None
