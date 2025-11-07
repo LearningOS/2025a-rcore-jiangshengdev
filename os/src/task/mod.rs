@@ -172,7 +172,7 @@ lazy_static! {
     /// 名称 "initproc" 可以替换为其他应用（如 "usertests"），
     /// 但由于存在 user_shell，因此无需修改。
     pub static ref INITPROC: Arc<ProcessControlBlock> = {
-        let inode = open_file("ch8b_initproc", OpenFlags::RDONLY).unwrap();
+        let inode = open_file("ch8b_threads", OpenFlags::RDONLY).unwrap();
         let v = inode.read_all();
         ProcessControlBlock::new(v.as_slice())
     };
