@@ -51,7 +51,7 @@ $(KERNEL_BIN): kernel
 fs-img: $(APPS)
 	@make -C ../user build TEST=$(TEST) CHAPTER=$(CHAPTER) BASE=$(BASE)
 	@rm -f $(FS_IMG)
-	@cd ../easy-fs-fuse && cargo run $(MODE_ARG) -- -s ../user/build/app/ -t ../user/target/riscv64gc-unknown-none-elf/$(MODE)/
+	@cd ../easy-fs-fuse && cargo run $(MODE_ARG) -- -s ../user/src/bin/ -t ../user/target/riscv64gc-unknown-none-elf/$(MODE)/
 
 kernel:
 	@echo Platform: $(BOARD)
