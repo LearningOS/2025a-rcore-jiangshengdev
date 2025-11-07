@@ -8,8 +8,8 @@ use super::{
     SuperBlock,
 };
 use crate::BLOCK_SZ;
-use core::ptr;
 use alloc::sync::Arc;
+use core::ptr;
 use spin::Mutex;
 
 /// EasyFileSystem struct
@@ -60,10 +60,8 @@ impl EasyFileSystem {
         for i in 0..total_blocks {
             get_block_cache(i as usize, Arc::clone(&block_device))
                 .lock()
-                .modify(0, |data_block: &mut DataBlock| {
-                    unsafe {
-                        ptr::write_bytes(data_block.as_mut_ptr(), 0, data_block.len());
-                    }
+                .modify(0, |data_block: &mut DataBlock| unsafe {
+                    ptr::write_bytes(data_block.as_mut_ptr(), 0, data_block.len());
                 });
         }
         // initialize SuperBlock
@@ -148,10 +146,8 @@ impl EasyFileSystem {
     pub fn dealloc_data(&mut self, block_id: u32) {
         get_block_cache(block_id as usize, Arc::clone(&self.block_device))
             .lock()
-            .modify(0, |data_block: &mut DataBlock| {
-                unsafe {
-                    ptr::write_bytes(data_block.as_mut_ptr(), 0, data_block.len());
-                }
+            .modify(0, |data_block: &mut DataBlock| unsafe {
+                ptr::write_bytes(data_block.as_mut_ptr(), 0, data_block.len());
             });
         self.data_bitmap.dealloc(
             &self.block_device,

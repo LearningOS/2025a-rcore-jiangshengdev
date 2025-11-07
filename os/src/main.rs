@@ -61,11 +61,7 @@ fn clear_bss() {
         fn ebss();
     }
     unsafe {
-        core::ptr::write_bytes(
-            sbss as usize as *mut u8,
-            0,
-            ebss as usize - sbss as usize,
-        );
+        core::ptr::write_bytes(sbss as usize as *mut u8, 0, ebss as usize - sbss as usize);
     }
 }
 
