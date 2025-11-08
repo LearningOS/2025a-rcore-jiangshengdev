@@ -2,6 +2,7 @@
 
 use super::id::RecycleAllocator;
 use super::manager::insert_into_pid2process;
+use super::runtime::{alloc_instance_id, register_fork, register_process, ProcInstanceId};
 use super::TaskControlBlock;
 use super::{add_task, SignalFlags};
 use super::{pid_alloc, PidHandle};
@@ -19,6 +20,7 @@ use core::cell::RefMut;
 pub struct ProcessControlBlock {
     /// 不可变部分
     pub pid: PidHandle,
+    instance_id: ProcInstanceId,
     /// 可变部分
     inner: UPSafeCell<ProcessControlBlockInner>,
 }
@@ -90,14 +92,16 @@ impl ProcessControlBlock {
         self.inner.exclusive_access()
     }
     /// 根据 ELF 文件创建新进程
-    pub fn new(elf_data: &[u8]) -> Arc<Self> {
+    pub fn new(elf_data: &[u8], name: &str) -> Arc<Self> {
         trace!("kernel: ProcessControlBlock::new");
         // 根据 ELF 生成的内存集合，包含程序头、trampoline、trap 上下文与用户栈
         let (memory_set, ustack_base, entry_point) = MemorySet::from_elf(elf_data);
         // 分配一个 PID
         let pid_handle = pid_alloc();
+        let instance_id = alloc_instance_id();
         let process = Arc::new(Self {
             pid: pid_handle,
+            instance_id,
             inner: unsafe {
                 UPSafeCell::new(ProcessControlBlockInner {
                     is_zombie: false,
@@ -147,6 +151,7 @@ impl ProcessControlBlock {
         process_inner.tasks.push(Some(Arc::clone(&task)));
         drop(process_inner);
         insert_into_pid2process(process.getpid(), Arc::clone(&process));
+        register_process(instance_id, process.getpid(), name);
         // 将主线程加入调度器
         add_task(task);
         process
@@ -214,12 +219,14 @@ impl ProcessControlBlock {
     /// 仅支持单线程进程。
     pub fn fork(self: &Arc<Self>) -> Arc<Self> {
         trace!("kernel: fork");
+        let parent_instance_id = self.instance_id();
         let mut parent = self.inner_exclusive_access();
         assert_eq!(parent.thread_count(), 1);
         // 完整克隆父进程的内存集合（含 trampoline、用户栈、trap_cx）
         let memory_set = MemorySet::from_existed_user(&parent.memory_set);
         // 分配 PID
         let pid = pid_alloc();
+        let child_instance_id = alloc_instance_id();
         // 拷贝文件描述符表
         let mut new_fd_table: Vec<Option<Arc<dyn File + Send + Sync>>> = Vec::new();
         for fd in parent.fd_table.iter() {
@@ -232,6 +239,7 @@ impl ProcessControlBlock {
         // 创建子进程 PCB
         let child = Arc::new(Self {
             pid,
+            instance_id: child_instance_id,
             inner: unsafe {
                 UPSafeCell::new(ProcessControlBlockInner {
                     is_zombie: false,
@@ -275,6 +283,7 @@ impl ProcessControlBlock {
         crate::dbg_hold(trap_cx);
         drop(task_inner);
         insert_into_pid2process(child.getpid(), Arc::clone(&child));
+        register_fork(parent_instance_id, child_instance_id, child.getpid());
         // 将线程加入调度器
         add_task(task);
         child
@@ -282,5 +291,10 @@ impl ProcessControlBlock {
     /// 获取 PID
     pub fn getpid(&self) -> usize {
         self.pid.0
+    }
+
+    /// 获取唯一进程实例 ID
+    pub fn instance_id(&self) -> ProcInstanceId {
+        self.instance_id
     }
 }
