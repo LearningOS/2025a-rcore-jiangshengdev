@@ -121,7 +121,7 @@ fn easy_fs_pack() -> std::io::Result<()> {
         EasyFileSystem::create(Arc::clone(&block_file), total_blocks as u32, 1)
     );
     let root_inode = time_call!("root_inode", Arc::new(EasyFileSystem::root_inode(&efs)));
-    let apps: Vec<_> = time_call!("scan_apps", {
+    let mut apps: Vec<_> = time_call!("scan_apps", {
         read_dir(src_path)
             .unwrap()
             .map(|dir_entry| {
@@ -131,6 +131,7 @@ fn easy_fs_pack() -> std::io::Result<()> {
             })
             .collect()
     });
+    apps.sort();
     for app in apps {
         time_call!(format!("pack {}", app), {
             // load app data from host file system
