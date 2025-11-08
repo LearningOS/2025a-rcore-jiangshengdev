@@ -141,12 +141,24 @@ pub fn report_duration(label: &str, duration_us: usize) {
 /// 记录当前时间点，便于无返回函数的追踪
 #[inline(always)]
 pub fn log_instant(label: &str) {
-    println!(
-        "[time]\t{:width$}\tat {} us",
-        label,
-        get_time_us(),
-        width = LABEL_WIDTH
-    );
+    let current_us = get_time_us();
+    let current_ms = current_us / MSEC_PER_SEC;
+    if current_ms > 0 {
+        println!(
+            "[time]\t{:width$}\tat {} us ({} ms)",
+            label,
+            current_us,
+            current_ms,
+            width = LABEL_WIDTH
+        );
+    } else {
+        println!(
+            "[time]\t{:width$}\tat {} us",
+            label,
+            current_us,
+            width = LABEL_WIDTH
+        );
+    }
 }
 
 /// 为函数调用统计执行时间
