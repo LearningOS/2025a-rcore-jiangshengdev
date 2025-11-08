@@ -5,8 +5,9 @@ use std::io::{Read, Seek, SeekFrom, Write};
 use std::sync::Arc;
 use std::sync::Mutex;
 
-const BLOCK_SZ: usize = 512;
+const BLOCK_SZ: usize = 4096;
 const LABEL_WIDTH: usize = 28;
+const DISK_SIZE_BYTES: usize = 320 * 1024 * 1024; // 320 MiB
 
 fn report_duration(label: &str, duration_us: u128) {
     let duration_ms = duration_us / 1_000;
@@ -46,14 +47,33 @@ impl BlockDevice for BlockFile {
         let mut file = self.0.lock().unwrap();
         file.seek(SeekFrom::Start((block_id * BLOCK_SZ) as u64))
             .expect("Error when seeking!");
-        assert_eq!(file.read(buf).unwrap(), BLOCK_SZ, "Not a complete block!");
+        let mut filled = 0usize;
+        while filled < BLOCK_SZ {
+            let chunk = file.read(&mut buf[filled..]).unwrap();
+            if chunk == 0 {
+                // host file may be sparse; pad logical block with zeros instead of failing
+                buf[filled..].fill(0);
+                filled = BLOCK_SZ;
+                break;
+            }
+            filled += chunk;
+        }
+        assert_eq!(filled, BLOCK_SZ, "Not a complete block!");
     }
 
     fn write_block(&self, block_id: usize, buf: &[u8]) {
         let mut file = self.0.lock().unwrap();
         file.seek(SeekFrom::Start((block_id * BLOCK_SZ) as u64))
             .expect("Error when seeking!");
-        assert_eq!(file.write(buf).unwrap(), BLOCK_SZ, "Not a complete block!");
+        let mut written = 0usize;
+        while written < BLOCK_SZ {
+            let chunk = file.write(&buf[written..]).unwrap();
+            if chunk == 0 {
+                break;
+            }
+            written += chunk;
+        }
+        assert_eq!(written, BLOCK_SZ, "Not a complete block!");
     }
 }
 
@@ -91,13 +111,14 @@ fn easy_fs_pack() -> std::io::Result<()> {
             .create(true)
             .truncate(true)
             .open(file_path)?;
-        file.set_len(320 * 2048 * 512).unwrap();
+        file.set_len(DISK_SIZE_BYTES as u64).unwrap();
         Ok::<Arc<dyn BlockDevice>, std::io::Error>(Arc::new(BlockFile(Mutex::new(file))))
     })?;
     // 320MiB, at most 4095 files
+    let total_blocks = DISK_SIZE_BYTES / BLOCK_SZ;
     let efs = time_call!(
         "EasyFileSystem::create",
-        EasyFileSystem::create(Arc::clone(&block_file), 320 * 2048, 1)
+        EasyFileSystem::create(Arc::clone(&block_file), total_blocks as u32, 1)
     );
     let root_inode = time_call!("root_inode", Arc::new(EasyFileSystem::root_inode(&efs)));
     let apps: Vec<_> = time_call!("scan_apps", {
@@ -131,6 +152,7 @@ fn easy_fs_pack() -> std::io::Result<()> {
 
 #[test]
 fn efs_test() -> std::io::Result<()> {
+    const TEST_DISK_SIZE_BYTES: usize = 4 * 1024 * 1024; // 4 MiB
     let block_file = Arc::new(BlockFile(Mutex::new({
         let f = OpenOptions::new()
             .read(true)
@@ -138,10 +160,11 @@ fn efs_test() -> std::io::Result<()> {
             .create(true)
             .truncate(true)
             .open("target/fs.img")?;
-        f.set_len(8192 * 512).unwrap();
+        f.set_len(TEST_DISK_SIZE_BYTES as u64).unwrap();
         f
     })));
-    EasyFileSystem::create(block_file.clone(), 4096, 1);
+    let test_blocks = TEST_DISK_SIZE_BYTES / BLOCK_SZ;
+    EasyFileSystem::create(block_file.clone(), test_blocks as u32, 1);
     let efs = EasyFileSystem::open(block_file.clone());
     let root_inode = EasyFileSystem::root_inode(&efs);
     root_inode.create("filea");

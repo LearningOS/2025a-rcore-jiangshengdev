@@ -6,7 +6,7 @@ pub use virtio_blk::VirtIOBlock;
 
 use crate::board::BlockDeviceImpl;
 use alloc::sync::Arc;
-use easy_fs::BlockDevice;
+use easy_fs::{BlockDevice, BLOCK_SZ};
 use lazy_static::*;
 
 lazy_static! {
@@ -18,8 +18,8 @@ lazy_static! {
 /// Test the block device
 pub fn block_device_test() {
     let block_device = BLOCK_DEVICE.clone();
-    let mut write_buffer = [0u8; 512];
-    let mut read_buffer = [0u8; 512];
+    let mut write_buffer = [0u8; BLOCK_SZ];
+    let mut read_buffer = [0u8; BLOCK_SZ];
     for i in 0..512 {
         for byte in write_buffer.iter_mut() {
             *byte = i as u8;

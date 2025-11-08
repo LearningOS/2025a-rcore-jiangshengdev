@@ -7,7 +7,7 @@ use super::{
     block_cache_sync_all, get_block_cache, Bitmap, BlockDevice, DiskInode, DiskInodeType, Inode,
     SuperBlock,
 };
-use crate::BLOCK_SZ;
+use crate::{bitmap::BLOCK_BITS, BLOCK_SZ};
 use alloc::sync::Arc;
 use core::ptr;
 use spin::Mutex;
@@ -42,7 +42,8 @@ impl EasyFileSystem {
             ((inode_num * core::mem::size_of::<DiskInode>() + BLOCK_SZ - 1) / BLOCK_SZ) as u32;
         let inode_total_blocks = inode_bitmap_blocks + inode_area_blocks;
         let data_total_blocks = total_blocks - 1 - inode_total_blocks;
-        let data_bitmap_blocks = (data_total_blocks + 4096) / 4097;
+        let block_bits = BLOCK_BITS as u32;
+        let data_bitmap_blocks = (data_total_blocks + block_bits) / (block_bits + 1);
         let data_area_blocks = data_total_blocks - data_bitmap_blocks;
         let data_bitmap = Bitmap::new(
             (1 + inode_bitmap_blocks + inode_area_blocks) as usize,

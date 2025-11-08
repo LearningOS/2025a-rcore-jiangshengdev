@@ -5,6 +5,7 @@ use crate::mm::{
 };
 use crate::sync::UPSafeCell;
 use alloc::vec::Vec;
+use easy_fs::BLOCK_SZ;
 use lazy_static::*;
 use virtio_drivers::{Hal, VirtIOBlk, VirtIOHeader};
 
@@ -18,20 +19,29 @@ lazy_static! {
     static ref QUEUE_FRAMES: UPSafeCell<Vec<FrameTracker>> = unsafe { UPSafeCell::new(Vec::new()) };
 }
 
+const SECTOR_SIZE: usize = 512;
+const SECTORS_PER_BLOCK: usize = BLOCK_SZ / SECTOR_SIZE;
+
 impl BlockDevice for VirtIOBlock {
     /// Read a block from the virtio_blk device
     fn read_block(&self, block_id: usize, buf: &mut [u8]) {
-        self.0
-            .exclusive_access()
-            .read_block(block_id, buf)
-            .expect("Error when reading VirtIOBlk");
+        debug_assert_eq!(buf.len(), BLOCK_SZ);
+        let mut device = self.0.exclusive_access();
+        for (i, chunk) in buf.chunks_mut(SECTOR_SIZE).enumerate() {
+            device
+                .read_block(block_id * SECTORS_PER_BLOCK + i, chunk)
+                .expect("Error when reading VirtIOBlk");
+        }
     }
     /// Write a block to the virtio_blk device
     fn write_block(&self, block_id: usize, buf: &[u8]) {
-        self.0
-            .exclusive_access()
-            .write_block(block_id, buf)
-            .expect("Error when writing VirtIOBlk");
+        debug_assert_eq!(buf.len(), BLOCK_SZ);
+        let mut device = self.0.exclusive_access();
+        for (i, chunk) in buf.chunks(SECTOR_SIZE).enumerate() {
+            device
+                .write_block(block_id * SECTORS_PER_BLOCK + i, chunk)
+                .expect("Error when writing VirtIOBlk");
+        }
     }
 }
 
