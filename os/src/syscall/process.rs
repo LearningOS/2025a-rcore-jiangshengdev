@@ -84,7 +84,7 @@ pub fn sys_exec(path: *const u8, mut args: *const usize) -> isize {
         let all_data = app_inode.read_all();
         let process = current_process();
         let argc = args_vec.len();
-        process.exec(all_data.as_slice(), args_vec);
+        process.exec(all_data.as_slice(), args_vec, path.as_str());
         // 返回 argc，因为稍后会覆盖到 cx.x[10]
         argc as isize
     } else {

@@ -61,6 +61,7 @@ pub fn enable_timer_interrupt() {
 #[no_mangle]
 pub fn trap_handler() -> ! {
     set_kernel_trap_entry();
+    crate::task::user_time_end();
     let scause = scause::read();
     let stval = stval::read();
     // trace!("into {:?}", scause.cause());
@@ -120,6 +121,7 @@ pub fn trap_handler() -> ! {
 pub fn trap_return() -> ! {
     //disable_supervisor_interrupt();
     set_user_trap_entry();
+    crate::task::user_time_start();
     let trap_cx_user_va = current_trap_cx_user_va();
     let user_satp = current_user_token();
     extern "C" {

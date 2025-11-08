@@ -41,6 +41,10 @@ pub struct TaskControlBlockInner {
     pub task_status: TaskStatus,
     /// 主动退出或执行错误时记录退出码
     pub exit_code: Option<i32>,
+    /// 记录任务累计的用户态运行时间（毫秒）
+    pub user_time_ms: usize,
+    /// 记录任务累计的内核态运行时间（毫秒）
+    pub kernel_time_ms: usize,
 }
 
 impl TaskControlBlockInner {
@@ -75,6 +79,8 @@ impl TaskControlBlock {
                     task_cx: TaskContext::goto_trap_return(kstack_top),
                     task_status: TaskStatus::Ready,
                     exit_code: None,
+                    user_time_ms: 0,
+                    kernel_time_ms: 0,
                 })
             },
         }

@@ -15,6 +15,7 @@ mod signal;
 mod switch;
 #[allow(clippy::module_inception)]
 mod task;
+mod time;
 
 use self::id::TaskUserRes;
 use crate::fs::{open_file, OpenFlags};
@@ -35,6 +36,7 @@ pub use processor::{
 };
 pub use signal::SignalFlags;
 pub use task::{TaskControlBlock, TaskStatus};
+pub use time::{user_time_end, user_time_start};
 
 /// 挂起当前任务并切换到下一个任务
 pub fn suspend_current_and_run_next() {
@@ -47,6 +49,7 @@ pub fn suspend_current_and_run_next() {
     // 将状态置为 Ready
     task_inner.task_status = TaskStatus::Ready;
     drop(task_inner);
+    time::record_kernel_time_for(&task);
     // ---- 释放当前任务控制块
 
     // 重新加入就绪队列。
@@ -64,6 +67,7 @@ pub fn block_current_and_run_next() {
     let task_cx_ptr = &mut task_inner.task_cx as *mut TaskContext;
     task_inner.task_status = TaskStatus::Blocked;
     drop(task_inner);
+    time::record_kernel_time_for(&task);
     unsafe {
         schedule(task_cx_ptr);
     }
@@ -88,11 +92,11 @@ pub fn exit_current_and_run_next(exit_code: i32) {
     // 此处不移除线程，因为仍在使用其内核栈；在 sys_waittid 调用时再回收
     drop(task_inner);
 
+    time::record_kernel_time_for(&task);
+
     // 将任务转入等待停止状态，避免内核栈被提前回收
     if tid == 0 {
-        add_stopping_task(task);
-    } else {
-        drop(task);
+        add_stopping_task(Arc::clone(&task));
     }
     // 但若该任务是当前进程的主线程，进程需要立刻终止
     if tid == 0 {
@@ -102,6 +106,7 @@ pub fn exit_current_and_run_next(exit_code: i32) {
                 "[kernel] Idle process exit with exit_code {} ...",
                 exit_code
             );
+            time::report_program_summary();
             if exit_code != 0 {
                 //crate::sbi::shutdown(255); //255 == -1 表示错误提示
                 crate::board::QEMU_EXIT_HANDLE.exit_failure();
@@ -157,6 +162,19 @@ pub fn exit_current_and_run_next(exit_code: i32) {
         process_inner.fd_table.clear();
         // 移除所有任务
         process_inner.tasks.clear();
+        drop(process_inner);
+
+        time::record_kernel_time_for(&task);
+        let (program_name, process_user_time_ms, process_kernel_time_ms) = {
+            let process_inner = process.inner_exclusive_access();
+            (
+                process_inner.name.clone(),
+                process_inner.user_time_ms,
+                process_inner.kernel_time_ms,
+            )
+        };
+
+        time::accumulate_program_time(&program_name, process_user_time_ms, process_kernel_time_ms);
     }
     drop(process);
     // 此时无需保存任务上下文
@@ -174,7 +192,7 @@ lazy_static! {
         let initproc_name = option_env!("INIT").unwrap_or("ch8b_initproc");
         let inode = open_file(initproc_name, OpenFlags::RDONLY).unwrap();
         let v = inode.read_all();
-        ProcessControlBlock::new(v.as_slice())
+    ProcessControlBlock::new(v.as_slice(), initproc_name)
     };
 }
 

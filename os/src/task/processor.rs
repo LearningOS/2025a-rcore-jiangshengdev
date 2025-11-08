@@ -5,7 +5,7 @@
 
 use super::__switch;
 use super::{fetch_task, TaskStatus};
-use super::{ProcessControlBlock, TaskContext, TaskControlBlock};
+use super::{time, ProcessControlBlock, TaskContext, TaskControlBlock};
 use crate::sync::UPSafeCell;
 use crate::trap::TrapContext;
 use alloc::sync::Arc;
@@ -50,6 +50,7 @@ lazy_static! {
 /// 进程执行与调度的主体逻辑
 /// 循环调用 `fetch_task` 获取待运行的任务，并通过 `__switch` 完成切换
 pub fn run_tasks() {
+    time::init();
     loop {
         let mut processor = PROCESSOR.exclusive_access();
         if let Some(task) = fetch_task() {
@@ -61,7 +62,9 @@ pub fn run_tasks() {
             // 手动释放任务内部引用
             drop(task_inner);
             // 手动释放任务控制块引用
+            let task_for_time = Arc::clone(&task);
             processor.current = Some(task);
+            time::on_task_switch_in(&task_for_time);
             // 手动释放处理器锁
             drop(processor);
             unsafe {
@@ -69,6 +72,7 @@ pub fn run_tasks() {
             }
         } else {
             warn!("no tasks available in run_tasks");
+            time::on_idle();
         }
     }
 }

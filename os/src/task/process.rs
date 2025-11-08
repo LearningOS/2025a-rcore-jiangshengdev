@@ -15,6 +15,10 @@ use alloc::vec;
 use alloc::vec::Vec;
 use core::cell::RefMut;
 
+fn normalize_program_name(path: &str) -> String {
+    String::from(path.rsplit('/').next().unwrap_or(path))
+}
+
 /// 进程控制块
 pub struct ProcessControlBlock {
     /// 不可变部分
@@ -49,6 +53,12 @@ pub struct ProcessControlBlockInner {
     pub semaphore_list: Vec<Option<Arc<Semaphore>>>,
     /// 条件变量列表
     pub condvar_list: Vec<Option<Arc<Condvar>>>,
+    /// 进程对应的程序名称
+    pub name: String,
+    /// 进程累计的用户态时间（毫秒）
+    pub user_time_ms: usize,
+    /// 进程累计的内核态时间（毫秒）
+    pub kernel_time_ms: usize,
 }
 
 impl ProcessControlBlockInner {
@@ -90,12 +100,13 @@ impl ProcessControlBlock {
         self.inner.exclusive_access()
     }
     /// 根据 ELF 文件创建新进程
-    pub fn new(elf_data: &[u8]) -> Arc<Self> {
+    pub fn new(elf_data: &[u8], name: &str) -> Arc<Self> {
         trace!("kernel: ProcessControlBlock::new");
         // 根据 ELF 生成的内存集合，包含程序头、trampoline、trap 上下文与用户栈
         let (memory_set, ustack_base, entry_point) = MemorySet::from_elf(elf_data);
         // 分配一个 PID
         let pid_handle = pid_alloc();
+        let program_name = normalize_program_name(name);
         let process = Arc::new(Self {
             pid: pid_handle,
             inner: unsafe {
@@ -119,6 +130,9 @@ impl ProcessControlBlock {
                     mutex_list: Vec::new(),
                     semaphore_list: Vec::new(),
                     condvar_list: Vec::new(),
+                    name: program_name,
+                    user_time_ms: 0,
+                    kernel_time_ms: 0,
                 })
             },
         });
@@ -153,9 +167,36 @@ impl ProcessControlBlock {
     }
 
     /// 仅支持单线程进程。
-    pub fn exec(self: &Arc<Self>, elf_data: &[u8], args: Vec<String>) {
+    pub fn exec(self: &Arc<Self>, elf_data: &[u8], args: Vec<String>, path: &str) {
         trace!("kernel: exec");
-        assert_eq!(self.inner_exclusive_access().thread_count(), 1);
+        {
+            let inner = self.inner_exclusive_access();
+            assert_eq!(inner.thread_count(), 1);
+        }
+        let new_program_name = normalize_program_name(path);
+        let (old_name, old_user_time_ms, old_kernel_time_ms, tasks_to_reset) = {
+            let mut inner = self.inner_exclusive_access();
+            let old_name = inner.name.clone();
+            let old_user_time_ms = inner.user_time_ms;
+            let old_kernel_time_ms = inner.kernel_time_ms;
+            inner.name = new_program_name;
+            inner.user_time_ms = 0;
+            inner.kernel_time_ms = 0;
+            let tasks = inner
+                .tasks
+                .iter()
+                .filter_map(|t| t.as_ref().map(Arc::clone))
+                .collect::<Vec<_>>();
+            (old_name, old_user_time_ms, old_kernel_time_ms, tasks)
+        };
+        if old_user_time_ms > 0 || old_kernel_time_ms > 0 {
+            super::time::accumulate_program_time(&old_name, old_user_time_ms, old_kernel_time_ms);
+        }
+        for task in tasks_to_reset {
+            let mut task_inner = task.inner_exclusive_access();
+            task_inner.user_time_ms = 0;
+            task_inner.kernel_time_ms = 0;
+        }
         // 根据 ELF 构建新的内存集合（程序头 / trampoline / trap 上下文 / 用户栈）
         trace!("kernel: exec .. MemorySet::from_elf");
         let (memory_set, ustack_base, entry_point) = MemorySet::from_elf(elf_data);
@@ -170,6 +211,8 @@ impl ProcessControlBlock {
         task_inner.res.as_mut().unwrap().ustack_base = ustack_base;
         task_inner.res.as_mut().unwrap().alloc_user_res();
         task_inner.trap_cx_ppn = task_inner.res.as_mut().unwrap().trap_cx_ppn();
+        task_inner.user_time_ms = 0;
+        task_inner.kernel_time_ms = 0;
         // 将参数压入用户栈
         trace!("kernel: exec .. push arguments on user stack");
         let mut user_sp = task_inner.res.as_mut().unwrap().ustack_top();
@@ -230,6 +273,7 @@ impl ProcessControlBlock {
             }
         }
         // 创建子进程 PCB
+        let child_program_name = parent.name.clone();
         let child = Arc::new(Self {
             pid,
             inner: unsafe {
@@ -246,6 +290,9 @@ impl ProcessControlBlock {
                     mutex_list: Vec::new(),
                     semaphore_list: Vec::new(),
                     condvar_list: Vec::new(),
+                    name: child_program_name,
+                    user_time_ms: 0,
+                    kernel_time_ms: 0,
                 })
             },
         });
