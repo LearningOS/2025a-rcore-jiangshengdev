@@ -82,16 +82,20 @@ fn clear_bss() {
 #[no_mangle]
 /// the rust entry-point of os
 pub fn rust_main() -> ! {
-    clear_bss();
-    println!("[kernel] Hello, world!");
-    logging::init();
-    mm::init();
-    mm::remap_test();
-    trap::init();
-    trap::enable_timer_interrupt();
-    timer::set_next_trigger();
-    fs::list_apps();
-    task::add_initproc();
+    time_call!("clear_bss", clear_bss());
+    time_call!("boot_banner", println!("[kernel] Hello, world!"));
+    time_call!("logging::init", logging::init());
+    time_call!("mm::init", mm::init());
+    time_call!("mm::remap_test", mm::remap_test());
+    time_call!("trap::init", trap::init());
+    time_call!(
+        "trap::enable_timer_interrupt",
+        trap::enable_timer_interrupt()
+    );
+    time_call!("timer::set_next_trigger", timer::set_next_trigger());
+    time_call!("fs::list_apps", fs::list_apps());
+    time_call!("task::add_initproc", task::add_initproc());
+    timer::log_instant("task::run_tasks start");
     task::run_tasks();
     panic!("Unreachable in rust_main!");
 }

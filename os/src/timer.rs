@@ -17,6 +17,8 @@ const MSEC_PER_SEC: usize = 1000;
 /// 每秒的微秒数
 #[allow(dead_code)]
 const MICRO_PER_SEC: usize = 1_000_000;
+/// 输出标签对齐宽度
+const LABEL_WIDTH: usize = 28;
 
 /// 以节拍为单位获取当前时间
 pub fn get_time() -> usize {
@@ -112,4 +114,49 @@ pub fn check_timer() {
             break;
         }
     }
+}
+
+/// 打印带标签的耗时信息
+#[inline(always)]
+pub fn report_duration(label: &str, duration_us: usize) {
+    let duration_ms = duration_us / MSEC_PER_SEC;
+    if duration_ms > 0 {
+        println!(
+            "[time]\t{:width$}\t{} us ({} ms)",
+            label,
+            duration_us,
+            duration_ms,
+            width = LABEL_WIDTH
+        );
+    } else {
+        println!(
+            "[time]\t{:width$}\t{} us",
+            label,
+            duration_us,
+            width = LABEL_WIDTH
+        );
+    }
+}
+
+/// 记录当前时间点，便于无返回函数的追踪
+#[inline(always)]
+pub fn log_instant(label: &str) {
+    println!(
+        "[time]\t{:width$}\tat {} us",
+        label,
+        get_time_us(),
+        width = LABEL_WIDTH
+    );
+}
+
+/// 为函数调用统计执行时间
+#[macro_export]
+macro_rules! time_call {
+    ($label:expr, $expr:expr) => {{
+        let __start = $crate::timer::get_time_us();
+        let __result = { $expr };
+        let __end = $crate::timer::get_time_us();
+        $crate::timer::report_duration($label, __end.saturating_sub(__start));
+        __result
+    }};
 }
