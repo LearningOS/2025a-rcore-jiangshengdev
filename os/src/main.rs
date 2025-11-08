@@ -55,6 +55,20 @@ use core::arch::global_asm;
 
 global_asm!(include_str!("entry.asm"));
 
+/// A tiny no-op helper that temporarily borrows a value.
+///
+/// Use this in debugging to keep a variable "alive" (i.e., used)
+/// until the call site, so debuggers can reliably inspect the
+/// most recent writes before optimization elides intermediate states.
+///
+/// It takes a shared reference and passes it to `core::hint::black_box`
+/// to discourage the compiler from optimizing the usage away.
+#[inline(always)]
+pub fn dbg_hold<T: ?Sized>(value: &T) {
+    // Prevent aggressive optimization from eliminating the use.
+    core::hint::black_box(value);
+}
+
 fn clear_bss() {
     extern "C" {
         fn sbss();

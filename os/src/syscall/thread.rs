@@ -50,6 +50,7 @@ pub fn sys_thread_create(entry: usize, arg: usize) -> isize {
         trap_handler as usize,
     );
     new_task_trap_cx.x[10] = arg;
+    crate::dbg_hold(new_task_trap_cx);
     new_task_tid as isize
 }
 /// 获取当前线程 ID 的系统调用

@@ -74,6 +74,8 @@ pub fn trap_handler() -> ! {
             // cx is changed during sys_exec, so we have to call it again
             cx = current_trap_cx();
             cx.x[10] = result as usize;
+            // Keep `cx` alive through here for easier debugging of the write above.
+            crate::dbg_hold(cx);
         }
         Trap::Exception(Exception::StoreFault)
         | Trap::Exception(Exception::StorePageFault)
@@ -134,7 +136,7 @@ pub fn trap_return() -> ! {
             in("a0") trap_cx_user_va,      // a0 = virt addr of Trap Context
             in("a1") user_satp,        // a1 = phy addr of usr page table
             options(noreturn)
-        );
+        )
     }
 }
 

@@ -141,6 +141,7 @@ impl ProcessControlBlock {
             kstack_top,
             trap_handler as usize,
         );
+        crate::dbg_hold(trap_cx);
         // 将主线程加入进程
         let mut process_inner = process.inner_exclusive_access();
         process_inner.tasks.push(Some(Arc::clone(&task)));
@@ -207,6 +208,7 @@ impl ProcessControlBlock {
         trap_cx.x[10] = args.len();
         trap_cx.x[11] = argv_base;
         *task_inner.get_trap_cx() = trap_cx;
+        crate::dbg_hold(task_inner.get_trap_cx());
     }
 
     /// 仅支持单线程进程。
@@ -270,6 +272,7 @@ impl ProcessControlBlock {
         let task_inner = task.inner_exclusive_access();
         let trap_cx = task_inner.get_trap_cx();
         trap_cx.kernel_sp = task.kstack.get_top();
+        crate::dbg_hold(trap_cx);
         drop(task_inner);
         insert_into_pid2process(child.getpid(), Arc::clone(&child));
         // 将线程加入调度器

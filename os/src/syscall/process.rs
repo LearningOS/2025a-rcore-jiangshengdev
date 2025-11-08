@@ -55,6 +55,7 @@ pub fn sys_fork() -> isize {
     let trap_cx = task.inner_exclusive_access().get_trap_cx();
     // 无需再次调整到下一条指令；对子进程而言，fork 返回 0
     trap_cx.x[10] = 0;
+    crate::dbg_hold(trap_cx);
     new_pid as isize
 }
 /// exec 系统调用
