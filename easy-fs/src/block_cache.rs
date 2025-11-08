@@ -76,7 +76,7 @@ impl Drop for BlockCache {
     }
 }
 
-const BLOCK_CACHE_SIZE: usize = 16;
+const BLOCK_CACHE_SIZE: usize = 64;
 
 /// BlockCacheManager is a manager for BlockCache.
 pub struct BlockCacheManager {
