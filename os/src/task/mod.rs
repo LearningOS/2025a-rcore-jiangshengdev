@@ -169,10 +169,10 @@ pub fn exit_current_and_run_next(exit_code: i32) {
 lazy_static! {
     /// 初始进程的创建
     ///
-    /// 名称 "initproc" 可以替换为其他应用（如 "usertests"），
-    /// 但由于存在 user_shell，因此无需修改。
+    /// 名称由环境变量 INIT 控制，默认值为 "ch8b_initproc"。
     pub static ref INITPROC: Arc<ProcessControlBlock> = {
-        let inode = open_file("ch8b_initproc", OpenFlags::RDONLY).unwrap();
+        let initproc_name = option_env!("INIT").unwrap_or("ch8b_initproc");
+        let inode = open_file(initproc_name, OpenFlags::RDONLY).unwrap();
         let v = inode.read_all();
         ProcessControlBlock::new(v.as_slice())
     };

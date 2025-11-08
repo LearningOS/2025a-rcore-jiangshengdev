@@ -7,6 +7,7 @@ DISASM_TMP := target/$(TARGET)/$(MODE)/asm
 FS_IMG := ../user/target/$(TARGET)/$(MODE)/fs.img
 APPS := ../user/src/bin/*
 OFFLINE :=
+INIT ?= ch8b_initproc
 
 # BOARD
 BOARD := qemu
@@ -55,7 +56,7 @@ fs-img: $(APPS)
 
 kernel:
 	@echo Platform: $(BOARD)
-	@cargo build $(MODE_ARG)
+	@INIT=$(INIT) cargo build $(MODE_ARG)
 
 clean:
 	@cargo clean
