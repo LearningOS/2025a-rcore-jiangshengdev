@@ -11,8 +11,6 @@ mod id;
 mod manager;
 mod process;
 mod processor;
-/// 应用运行时统计模块。
-pub mod runtime;
 mod signal;
 mod switch;
 #[allow(clippy::module_inception)]
@@ -21,7 +19,7 @@ mod task;
 use self::id::TaskUserRes;
 use crate::fs::{open_file, OpenFlags};
 use crate::task::manager::add_stopping_task;
-use crate::timer::{get_time_us, remove_timer};
+use crate::timer::remove_timer;
 use alloc::{sync::Arc, vec::Vec};
 use lazy_static::*;
 use manager::fetch_task;
@@ -42,8 +40,6 @@ pub use task::{TaskControlBlock, TaskStatus};
 pub fn suspend_current_and_run_next() {
     // 此时必定有一个应用正在运行。
     let task = take_current_task().unwrap();
-    let now = get_time_us();
-    runtime::stop_running(task.process.upgrade().unwrap().instance_id(), now);
 
     // ---- 独占访问当前任务控制块
     let mut task_inner = task.inner_exclusive_access();
@@ -64,8 +60,6 @@ pub fn suspend_current_and_run_next() {
 /// 阻塞当前任务并切换到下一个任务。
 pub fn block_current_and_run_next() {
     let task = take_current_task().unwrap();
-    let now = get_time_us();
-    runtime::stop_running(task.process.upgrade().unwrap().instance_id(), now);
     let mut task_inner = task.inner_exclusive_access();
     let task_cx_ptr = &mut task_inner.task_cx as *mut TaskContext;
     task_inner.task_status = TaskStatus::Blocked;
@@ -88,8 +82,6 @@ pub fn exit_current_and_run_next(exit_code: i32) {
     let mut task_inner = task.inner_exclusive_access();
     let process = task.process.upgrade().unwrap();
     let tid = task_inner.res.as_ref().unwrap().tid;
-    let now = get_time_us();
-    runtime::stop_running(process.instance_id(), now);
     // 记录退出码
     task_inner.exit_code = Some(exit_code);
     task_inner.res = None;
@@ -105,9 +97,7 @@ pub fn exit_current_and_run_next(exit_code: i32) {
     // 但若该任务是当前进程的主线程，进程需要立刻终止
     if tid == 0 {
         let pid = process.getpid();
-        runtime::mark_exit(process.instance_id(), exit_code, now);
         if pid == IDLE_PID {
-            runtime::print_summary();
             println!(
                 "[kernel] Idle process exit with exit_code {} ...",
                 exit_code
@@ -184,7 +174,7 @@ lazy_static! {
         let initproc_name = option_env!("INIT").unwrap_or("ch8b_initproc");
         let inode = open_file(initproc_name, OpenFlags::RDONLY).unwrap();
         let v = inode.read_all();
-        ProcessControlBlock::new(v.as_slice(), initproc_name)
+        ProcessControlBlock::new(v.as_slice())
     };
 }
 

@@ -5,7 +5,7 @@ use crate::{
     mm::{translated_ref, translated_refmut, translated_str},
     task::{
         current_process, current_task, current_user_token, exit_current_and_run_next, pid2process,
-        runtime, suspend_current_and_run_next, SignalFlags,
+        suspend_current_and_run_next, SignalFlags,
     },
 };
 use alloc::{string::String, sync::Arc, vec::Vec};
@@ -83,7 +83,6 @@ pub fn sys_exec(path: *const u8, mut args: *const usize) -> isize {
     if let Some(app_inode) = open_file(path.as_str(), OpenFlags::RDONLY) {
         let all_data = app_inode.read_all();
         let process = current_process();
-        runtime::mark_exec(process.instance_id(), path.as_str(), get_time_us());
         let argc = args_vec.len();
         process.exec(all_data.as_slice(), args_vec);
         // 返回 argc，因为稍后会覆盖到 cx.x[10]

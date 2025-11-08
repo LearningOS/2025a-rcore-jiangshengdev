@@ -4,11 +4,9 @@
 //! 并负责不同应用控制流的切换与转移。
 
 use super::__switch;
-use super::runtime;
 use super::{fetch_task, TaskStatus};
 use super::{ProcessControlBlock, TaskContext, TaskControlBlock};
 use crate::sync::UPSafeCell;
-use crate::timer::get_time_us;
 use crate::trap::TrapContext;
 use alloc::sync::Arc;
 use lazy_static::*;
@@ -62,9 +60,6 @@ pub fn run_tasks() {
             task_inner.task_status = TaskStatus::Running;
             // 手动释放任务内部引用
             drop(task_inner);
-            if let Some(process) = task.process.upgrade() {
-                runtime::start_running(process.instance_id(), get_time_us());
-            }
             // 手动释放任务控制块引用
             processor.current = Some(task);
             // 手动释放处理器锁
