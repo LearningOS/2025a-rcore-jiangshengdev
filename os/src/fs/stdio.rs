@@ -2,6 +2,7 @@ use super::File;
 use crate::mm::UserBuffer;
 use crate::sbi::console_getchar;
 use crate::task::suspend_current_and_run_next;
+use riscv::asm::wfi;
 
 /// stdin file for getting chars from console
 pub struct Stdin;
@@ -23,6 +24,9 @@ impl File for Stdin {
         loop {
             c = console_getchar();
             if c == 0 {
+                unsafe {
+                    wfi();
+                }
                 suspend_current_and_run_next();
                 continue;
             } else {
