@@ -89,6 +89,7 @@ fn easy_fs_pack() -> std::io::Result<()> {
             .read(true)
             .write(true)
             .create(true)
+            .truncate(true)
             .open(file_path)?;
         file.set_len(320 * 2048 * 512).unwrap();
         Ok::<Arc<dyn BlockDevice>, std::io::Error>(Arc::new(BlockFile(Mutex::new(file))))
@@ -135,6 +136,7 @@ fn efs_test() -> std::io::Result<()> {
             .read(true)
             .write(true)
             .create(true)
+            .truncate(true)
             .open("target/fs.img")?;
         f.set_len(8192 * 512).unwrap();
         f
