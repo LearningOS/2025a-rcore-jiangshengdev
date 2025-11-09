@@ -116,9 +116,23 @@ pub fn check_timer() {
     }
 }
 
+/// 是否启用性能统计与打印（编译期环境变量 PERF 存在时启用）
+#[inline(always)]
+pub fn perf_enabled() -> bool {
+    // 参考 INIT 的用法：使用 option_env! 在编译期捕获环境变量
+    // 只要设置了 PERF（任意非空值），就开启统计与打印
+    // 未设置时返回 false
+    option_env!("PERF")
+        .map(|val| !val.is_empty())
+        .unwrap_or(false)
+}
+
 /// 打印带标签的耗时信息
 #[inline(always)]
 pub fn report_duration(label: &str, duration_us: usize) {
+    if !perf_enabled() {
+        return;
+    }
     let duration_ms = duration_us / MSEC_PER_SEC;
     if duration_ms > 0 {
         println!(
@@ -141,6 +155,9 @@ pub fn report_duration(label: &str, duration_us: usize) {
 /// 记录当前时间点，便于无返回函数的追踪
 #[inline(always)]
 pub fn log_instant(label: &str) {
+    if !perf_enabled() {
+        return;
+    }
     let current_us = get_time_us();
     let current_ms = current_us / MSEC_PER_SEC;
     if current_ms > 0 {
@@ -165,10 +182,17 @@ pub fn log_instant(label: &str) {
 #[macro_export]
 macro_rules! time_call {
     ($label:expr, $expr:expr) => {{
-        let __start = $crate::timer::get_time_us();
-        let __result = { $expr };
-        let __end = $crate::timer::get_time_us();
-        $crate::timer::report_duration($label, __end.saturating_sub(__start));
-        __result
+        if $crate::timer::perf_enabled() {
+            let __start = $crate::timer::get_time_us();
+            let __result = { $expr };
+            let __end = $crate::timer::get_time_us();
+            $crate::timer::report_duration($label, __end.saturating_sub(__start));
+            __result
+        } else {
+            // 未开启 PERF 时直接执行表达式，避免测量开销
+            {
+                $expr
+            }
+        }
     }};
 }

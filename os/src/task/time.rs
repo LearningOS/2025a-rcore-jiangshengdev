@@ -1,6 +1,6 @@
 use super::{processor::current_task, TaskControlBlock};
 use crate::sync::UPSafeCell;
-use crate::timer::get_time_ms;
+use crate::timer::{get_time_ms, perf_enabled};
 use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::sync::Arc;
@@ -81,11 +81,16 @@ fn accumulate_task_kernel_time(task: &Arc<TaskControlBlock>, diff: usize) {
 
 /// 初始化停表，需在调度循环启动前调用。
 pub fn init() {
-    mark_stop_watch();
+    if perf_enabled() {
+        mark_stop_watch();
+    }
 }
 
 /// 用户态陷入内核时调用，累计当前任务的用户态时间。
 pub fn user_time_end() {
+    if !perf_enabled() {
+        return;
+    }
     let diff = refresh_stop_watch();
     if diff == 0 {
         return;
@@ -99,6 +104,9 @@ pub fn user_time_end() {
 
 /// 返回用户态前调用，累计当前任务的内核态时间。
 pub fn user_time_start() {
+    if !perf_enabled() {
+        return;
+    }
     let diff = refresh_stop_watch();
     if diff == 0 {
         return;
@@ -112,6 +120,9 @@ pub fn user_time_start() {
 
 /// 任务在内核中被切换出去时调用，统计最近一次内核段。
 pub fn record_kernel_time_for(task: &Arc<TaskControlBlock>) {
+    if !perf_enabled() {
+        return;
+    }
     let diff = refresh_stop_watch();
     if diff == 0 {
         return;
@@ -121,16 +132,23 @@ pub fn record_kernel_time_for(task: &Arc<TaskControlBlock>) {
 
 /// 新任务即将在内核态恢复执行时调用，避免将调度间隙计入其他任务。
 pub fn on_task_switch_in(_task: &Arc<TaskControlBlock>) {
-    mark_stop_watch();
+    if perf_enabled() {
+        mark_stop_watch();
+    }
 }
 
 /// 调度器暂时没有任务可运行时调用，重置停表避免空闲时间计入下一次统计。
 pub fn on_idle() {
-    mark_stop_watch();
+    if perf_enabled() {
+        mark_stop_watch();
+    }
 }
 
 /// 记录单个进程（按程序名称）的累计时间。
 pub fn accumulate_program_time(name: &str, user_ms: usize, kernel_ms: usize) {
+    if !perf_enabled() {
+        return;
+    }
     if user_ms == 0 && kernel_ms == 0 {
         return;
     }
@@ -143,6 +161,9 @@ pub fn accumulate_program_time(name: &str, user_ms: usize, kernel_ms: usize) {
 
 /// 系统关闭前输出所有程序名称的时间汇总。
 pub fn report_program_summary() {
+    if !perf_enabled() {
+        return;
+    }
     let summary = PROGRAM_TIME.exclusive_access();
     if summary.is_empty() {
         println!("[time]\tprogram_time_summary\tno_records");

@@ -8,6 +8,7 @@ FS_IMG := ../user/target/$(TARGET)/$(MODE)/fs.img
 APPS := ../user/src/bin/*
 OFFLINE :=
 INIT ?= ch8b_initproc
+PERF ?=
 
 # BOARD
 BOARD := qemu
@@ -56,7 +57,7 @@ fs-img: $(APPS)
 
 kernel:
 	@echo Platform: $(BOARD)
-	@INIT=$(INIT) cargo build $(MODE_ARG)
+	@INIT=$(INIT) PERF=$(PERF) cargo build $(MODE_ARG)
 
 clean:
 	@cargo clean

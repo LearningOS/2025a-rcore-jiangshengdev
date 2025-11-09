@@ -8,7 +8,16 @@ use std::sync::Mutex;
 const LABEL_WIDTH: usize = 28;
 const DISK_SIZE_BYTES: usize = 320 * 1024 * 1024; // 320 MiB
 
+fn perf_enabled() -> bool {
+    option_env!("PERF")
+        .map(|val| !val.is_empty())
+        .unwrap_or(false)
+}
+
 fn report_duration(label: &str, duration_us: u128) {
+    if !perf_enabled() {
+        return;
+    }
     let duration_ms = duration_us / 1_000;
     if duration_ms > 0 {
         println!(
@@ -30,12 +39,18 @@ fn report_duration(label: &str, duration_us: u128) {
 
 macro_rules! time_call {
     ($label:expr, $expr:expr) => {{
-        let __label: std::borrow::Cow<'static, str> = $label.into();
-        let __start = std::time::Instant::now();
-        let __result = { $expr };
-        let __elapsed = __start.elapsed();
-        crate::report_duration(__label.as_ref(), __elapsed.as_micros());
-        __result
+        if $crate::perf_enabled() {
+            let __label: std::borrow::Cow<'static, str> = $label.into();
+            let __start = std::time::Instant::now();
+            let __result = { $expr };
+            let __elapsed = __start.elapsed();
+            crate::report_duration(__label.as_ref(), __elapsed.as_micros());
+            __result
+        } else {
+            {
+                $expr
+            }
+        }
     }};
 }
 

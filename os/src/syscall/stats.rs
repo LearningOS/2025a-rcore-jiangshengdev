@@ -4,6 +4,7 @@ use alloc::{collections::BTreeMap, vec::Vec};
 use lazy_static::lazy_static;
 
 use crate::sync::UPSafeCell;
+use crate::timer::perf_enabled;
 
 #[derive(Default)]
 pub struct SyscallStats {
@@ -66,6 +67,9 @@ fn syscall_name(id: usize) -> &'static str {
 }
 
 pub fn record_syscall_cost(syscall_id: usize, duration_ms: usize) {
+    if !perf_enabled() {
+        return;
+    }
     let mut stats_map = SYSCALL_STATS.exclusive_access();
     let entry = stats_map.entry(syscall_id).or_default();
     entry.calls += 1;
@@ -76,6 +80,9 @@ pub fn record_syscall_cost(syscall_id: usize, duration_ms: usize) {
 }
 
 pub fn report_syscall_summary() {
+    if !perf_enabled() {
+        return;
+    }
     let stats_map = SYSCALL_STATS.exclusive_access();
     if stats_map.is_empty() {
         println!("[syscall]\ttime_summary\tno_records");

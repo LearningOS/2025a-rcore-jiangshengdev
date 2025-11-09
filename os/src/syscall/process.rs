@@ -1,5 +1,5 @@
 use crate::mm::translated_byte_buffer;
-use crate::timer::get_time_us;
+use crate::timer::{get_time_us, perf_enabled};
 use crate::{
     fs::{open_file, OpenFlags},
     mm::{translated_ref, translated_refmut, translated_str},
@@ -93,33 +93,35 @@ pub fn sys_exec(path: *const u8, mut args: *const usize) -> isize {
         let process = current_process();
         let argc = args_vec.len();
         let exec_profile = process.exec(all_data.as_slice(), args_vec, path.as_str());
-        let total_us = get_time_us().saturating_sub(total_start);
-        let total_ms = total_us / 1_000;
-        let name_width = max(path.len(), 41);
-        let aligned_name = format!("{:width$}", path, width = name_width);
-        const LABEL_PAD: usize = 9;
-        let fmt_ms = |label: &str, value_ms: usize| {
-            format!("{:>width$}= {:>6}ms", label, value_ms, width = LABEL_PAD)
-        };
-        let fmt_us = |label: &str, value_us: usize| {
-            format!("{:>width$}= {:>6}us", label, value_us, width = LABEL_PAD)
-        };
-        println!("[exec-prof] {} {}", aligned_name, fmt_ms("total", total_ms));
-        println!(
-            "[exec-prof]   {} {} {} {} {}",
-            fmt_us("args", arg_collect_us),
-            fmt_us("open", open_us),
-            fmt_us("read", read_us),
-            fmt_us("reset", exec_profile.reset_us),
-            fmt_us("mem", exec_profile.memory_set_us)
-        );
-        println!(
-            "[exec-prof]   {} {} {} {}",
-            fmt_us("install", exec_profile.install_us),
-            fmt_us("user_res", exec_profile.user_res_us),
-            fmt_us("argv", exec_profile.argv_us),
-            fmt_us("trap", exec_profile.trap_us)
-        );
+        if perf_enabled() {
+            let total_us = get_time_us().saturating_sub(total_start);
+            let total_ms = total_us / 1_000;
+            let name_width = max(path.len(), 41);
+            let aligned_name = format!("{:width$}", path, width = name_width);
+            const LABEL_PAD: usize = 9;
+            let fmt_ms = |label: &str, value_ms: usize| {
+                format!("{:>width$}= {:>6}ms", label, value_ms, width = LABEL_PAD)
+            };
+            let fmt_us = |label: &str, value_us: usize| {
+                format!("{:>width$}= {:>6}us", label, value_us, width = LABEL_PAD)
+            };
+            println!("[exec-prof] {} {}", aligned_name, fmt_ms("total", total_ms));
+            println!(
+                "[exec-prof]   {} {} {} {} {}",
+                fmt_us("args", arg_collect_us),
+                fmt_us("open", open_us),
+                fmt_us("read", read_us),
+                fmt_us("reset", exec_profile.reset_us),
+                fmt_us("mem", exec_profile.memory_set_us)
+            );
+            println!(
+                "[exec-prof]   {} {} {} {}",
+                fmt_us("install", exec_profile.install_us),
+                fmt_us("user_res", exec_profile.user_res_us),
+                fmt_us("argv", exec_profile.argv_us),
+                fmt_us("trap", exec_profile.trap_us)
+            );
+        }
         // 返回 argc，因为稍后会覆盖到 cx.x[10]
         argc as isize
     } else {
