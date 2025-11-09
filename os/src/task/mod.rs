@@ -107,6 +107,7 @@ pub fn exit_current_and_run_next(exit_code: i32) {
                 exit_code
             );
             time::report_program_summary();
+            crate::syscall::stats::report_syscall_summary();
             if exit_code != 0 {
                 //crate::sbi::shutdown(255); //255 == -1 表示错误提示
                 crate::board::QEMU_EXIT_HANDLE.exit_failure();

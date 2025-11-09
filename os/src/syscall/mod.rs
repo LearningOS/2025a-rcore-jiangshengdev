@@ -96,6 +96,7 @@ pub const SYSCALL_CONDVAR_WAIT: usize = 473;
 
 mod fs;
 mod process;
+pub(crate) mod stats;
 mod sync;
 mod thread;
 
@@ -105,10 +106,12 @@ use sync::*;
 use thread::*;
 
 use crate::fs::Stat;
+use crate::timer::get_time_ms;
 
 /// 根据 `syscall_id` 及其参数处理系统调用异常
 pub fn syscall(syscall_id: usize, args: [usize; 4]) -> isize {
-    match syscall_id {
+    let start = get_time_ms();
+    let result = match syscall_id {
         SYSCALL_DUP => sys_dup(args[0]),
         SYSCALL_LINKAT => sys_linkat(args[1] as *const u8, args[3] as *const u8),
         SYSCALL_UNLINKAT => sys_unlinkat(args[1] as *const u8),
@@ -118,7 +121,12 @@ pub fn syscall(syscall_id: usize, args: [usize; 4]) -> isize {
         SYSCALL_READ => sys_read(args[0], args[1] as *const u8, args[2]),
         SYSCALL_WRITE => sys_write(args[0], args[1] as *const u8, args[2]),
         SYSCALL_FSTAT => sys_fstat(args[0], args[1] as *mut Stat),
-        SYSCALL_EXIT => sys_exit(args[0] as i32),
+        SYSCALL_EXIT => {
+            // sys_exit returns !, so record the elapsed time before we leave this scope.
+            let elapsed = get_time_ms().saturating_sub(start);
+            stats::record_syscall_cost(syscall_id, elapsed);
+            sys_exit(args[0] as i32);
+        }
         SYSCALL_SLEEP => sys_sleep(args[0]),
         SYSCALL_YIELD => sys_yield(),
         SYSCALL_GETPID => sys_getpid(),
@@ -145,5 +153,8 @@ pub fn syscall(syscall_id: usize, args: [usize; 4]) -> isize {
         SYSCALL_CONDVAR_WAIT => sys_condvar_wait(args[0], args[1]),
         SYSCALL_KILL => sys_kill(args[0], args[1] as u32),
         _ => panic!("Unsupported syscall_id: {}", syscall_id),
-    }
+    };
+    let elapsed = get_time_ms().saturating_sub(start);
+    stats::record_syscall_cost(syscall_id, elapsed);
+    result
 }
