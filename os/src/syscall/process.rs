@@ -8,7 +8,8 @@ use crate::{
         suspend_current_and_run_next, SignalFlags,
     },
 };
-use alloc::{string::String, sync::Arc, vec::Vec};
+use alloc::{format, string::String, sync::Arc, vec::Vec};
+use core::cmp::max;
 use core::mem::size_of;
 
 #[repr(C)]
@@ -67,6 +68,8 @@ pub fn sys_exec(path: *const u8, mut args: *const usize) -> isize {
         "kernel:pid[{}] sys_exec",
         current_task().unwrap().process.upgrade().unwrap().getpid()
     );
+    let total_start = get_time_us();
+    let arg_collect_start = total_start;
     let token = current_user_token();
     let path = translated_str(token, path);
     let mut args_vec: Vec<String> = Vec::new();
@@ -80,11 +83,43 @@ pub fn sys_exec(path: *const u8, mut args: *const usize) -> isize {
             args = args.add(1);
         }
     }
+    let arg_collect_us = get_time_us().saturating_sub(arg_collect_start);
+    let open_start = get_time_us();
     if let Some(app_inode) = open_file(path.as_str(), OpenFlags::RDONLY) {
+        let open_us = get_time_us().saturating_sub(open_start);
+        let read_start = get_time_us();
         let all_data = app_inode.read_all();
+        let read_us = get_time_us().saturating_sub(read_start);
         let process = current_process();
         let argc = args_vec.len();
-        process.exec(all_data.as_slice(), args_vec, path.as_str());
+        let exec_profile = process.exec(all_data.as_slice(), args_vec, path.as_str());
+        let total_us = get_time_us().saturating_sub(total_start);
+        let total_ms = total_us / 1_000;
+        let name_width = max(path.len(), 41);
+        let aligned_name = format!("{:width$}", path, width = name_width);
+        const LABEL_PAD: usize = 9;
+        let fmt_ms = |label: &str, value_ms: usize| {
+            format!("{:>width$}= {:>6}ms", label, value_ms, width = LABEL_PAD)
+        };
+        let fmt_us = |label: &str, value_us: usize| {
+            format!("{:>width$}= {:>6}us", label, value_us, width = LABEL_PAD)
+        };
+        println!("[exec-prof] {} {}", aligned_name, fmt_ms("total", total_ms));
+        println!(
+            "[exec-prof]   {} {} {} {} {}",
+            fmt_us("args", arg_collect_us),
+            fmt_us("open", open_us),
+            fmt_us("read", read_us),
+            fmt_us("reset", exec_profile.reset_us),
+            fmt_us("mem", exec_profile.memory_set_us)
+        );
+        println!(
+            "[exec-prof]   {} {} {} {}",
+            fmt_us("install", exec_profile.install_us),
+            fmt_us("user_res", exec_profile.user_res_us),
+            fmt_us("argv", exec_profile.argv_us),
+            fmt_us("trap", exec_profile.trap_us)
+        );
         // 返回 argc，因为稍后会覆盖到 cx.x[10]
         argc as isize
     } else {

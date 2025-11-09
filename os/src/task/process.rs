@@ -8,6 +8,7 @@ use super::{pid_alloc, PidHandle};
 use crate::fs::{File, Stdin, Stdout};
 use crate::mm::{translated_refmut, MemorySet, KERNEL_SPACE};
 use crate::sync::{Condvar, Mutex, Semaphore, UPSafeCell};
+use crate::timer::get_time_us;
 use crate::trap::{trap_handler, TrapContext};
 use alloc::string::String;
 use alloc::sync::{Arc, Weak};
@@ -25,6 +26,16 @@ pub struct ProcessControlBlock {
     pub pid: PidHandle,
     /// 可变部分
     inner: UPSafeCell<ProcessControlBlockInner>,
+}
+
+/// `exec` 流程中各阶段的耗时细分（微秒）
+pub struct ExecPerfDetail {
+    pub reset_us: usize,
+    pub memory_set_us: usize,
+    pub install_us: usize,
+    pub user_res_us: usize,
+    pub argv_us: usize,
+    pub trap_us: usize,
 }
 
 /// 进程控制块的内部状态
@@ -167,12 +178,18 @@ impl ProcessControlBlock {
     }
 
     /// 仅支持单线程进程。
-    pub fn exec(self: &Arc<Self>, elf_data: &[u8], args: Vec<String>, path: &str) {
+    pub fn exec(
+        self: &Arc<Self>,
+        elf_data: &[u8],
+        args: Vec<String>,
+        path: &str,
+    ) -> ExecPerfDetail {
         trace!("kernel: exec");
         {
             let inner = self.inner_exclusive_access();
             assert_eq!(inner.thread_count(), 1);
         }
+        let reset_start = get_time_us();
         let new_program_name = normalize_program_name(path);
         let (old_name, old_user_time_ms, old_kernel_time_ms, tasks_to_reset) = {
             let mut inner = self.inner_exclusive_access();
@@ -197,24 +214,32 @@ impl ProcessControlBlock {
             task_inner.user_time_ms = 0;
             task_inner.kernel_time_ms = 0;
         }
+        let reset_us = get_time_us().saturating_sub(reset_start);
         // 根据 ELF 构建新的内存集合（程序头 / trampoline / trap 上下文 / 用户栈）
         trace!("kernel: exec .. MemorySet::from_elf");
+        let memory_start = get_time_us();
         let (memory_set, ustack_base, entry_point) = MemorySet::from_elf(elf_data);
+        let memory_set_us = get_time_us().saturating_sub(memory_start);
         let new_token = memory_set.token();
         // 替换原有内存集合
         trace!("kernel: exec .. substitute memory_set");
+        let install_start = get_time_us();
         self.inner_exclusive_access().memory_set = memory_set;
+        let install_us = get_time_us().saturating_sub(install_start);
         // 由于内存集合已改变，需要重新为主线程分配用户资源
         trace!("kernel: exec .. alloc user resource for main thread again");
         let task = self.inner_exclusive_access().get_task(0);
         let mut task_inner = task.inner_exclusive_access();
+        let user_res_start = get_time_us();
         task_inner.res.as_mut().unwrap().ustack_base = ustack_base;
         task_inner.res.as_mut().unwrap().alloc_user_res();
         task_inner.trap_cx_ppn = task_inner.res.as_mut().unwrap().trap_cx_ppn();
         task_inner.user_time_ms = 0;
         task_inner.kernel_time_ms = 0;
+        let user_res_us = get_time_us().saturating_sub(user_res_start);
         // 将参数压入用户栈
         trace!("kernel: exec .. push arguments on user stack");
+        let argv_start = get_time_us();
         let mut user_sp = task_inner.res.as_mut().unwrap().ustack_top();
         user_sp -= (args.len() + 1) * core::mem::size_of::<usize>();
         let argv_base = user_sp;
@@ -239,8 +264,10 @@ impl ProcessControlBlock {
         }
         // 对齐栈指针到 8 字节（适配 k210 平台）
         user_sp -= user_sp % core::mem::size_of::<usize>();
+        let argv_us = get_time_us().saturating_sub(argv_start);
         // 初始化 trap_cx
         trace!("kernel: exec .. initialize trap_cx");
+        let trap_start = get_time_us();
         let mut trap_cx = TrapContext::app_init_context(
             entry_point,
             user_sp,
@@ -252,6 +279,15 @@ impl ProcessControlBlock {
         trap_cx.x[11] = argv_base;
         *task_inner.get_trap_cx() = trap_cx;
         crate::dbg_hold(task_inner.get_trap_cx());
+        let trap_us = get_time_us().saturating_sub(trap_start);
+        ExecPerfDetail {
+            reset_us,
+            memory_set_us,
+            install_us,
+            user_res_us,
+            argv_us,
+            trap_us,
+        }
     }
 
     /// 仅支持单线程进程。
