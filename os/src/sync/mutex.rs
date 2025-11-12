@@ -67,13 +67,12 @@ impl Mutex for MutexSpin {
 
 /// Blocking Mutex struct
 pub struct MutexBlocking {
-    /// Shared state tracking lock ownership and waiters
-    pub inner: UPSafeCell<MutexBlockingInner>,
+    pub(crate) inner: UPSafeCell<MutexBlockingInner>,
 }
 
 pub struct MutexBlockingInner {
     locked: bool,
-    pub wait_queue: VecDeque<Arc<TaskControlBlock>>,
+    pub(crate) wait_queue: VecDeque<Arc<TaskControlBlock>>,
     pub owner_tid: Option<usize>,
 }
 
