@@ -5,7 +5,6 @@ use crate::task::TaskControlBlock;
 use crate::task::{block_current_and_run_next, suspend_current_and_run_next};
 use crate::task::{current_task, wakeup_task};
 use alloc::{collections::VecDeque, sync::Arc};
-use core::any::Any;
 
 /// Mutex trait
 pub trait Mutex: Sync + Send {
@@ -13,8 +12,6 @@ pub trait Mutex: Sync + Send {
     fn lock(&self);
     /// Unlock the mutex
     fn unlock(&self);
-    /// Allow downcasting to concrete mutex types
-    fn as_any(&self) -> &dyn Any;
 }
 
 /// Spinlock Mutex struct
@@ -59,21 +56,16 @@ impl Mutex for MutexSpin {
         let mut locked = self.locked.exclusive_access();
         *locked = false;
     }
-
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
 }
 
 /// Blocking Mutex struct
 pub struct MutexBlocking {
-    pub(crate) inner: UPSafeCell<MutexBlockingInner>,
+    inner: UPSafeCell<MutexBlockingInner>,
 }
 
 pub struct MutexBlockingInner {
     locked: bool,
-    pub(crate) wait_queue: VecDeque<Arc<TaskControlBlock>>,
-    pub owner_tid: Option<usize>,
+    wait_queue: VecDeque<Arc<TaskControlBlock>>,
 }
 
 impl Default for MutexBlocking {
@@ -91,7 +83,6 @@ impl MutexBlocking {
                 UPSafeCell::new(MutexBlockingInner {
                     locked: false,
                     wait_queue: VecDeque::new(),
-                    owner_tid: None,
                 })
             },
         }
@@ -109,7 +100,6 @@ impl Mutex for MutexBlocking {
             block_current_and_run_next();
         } else {
             mutex_inner.locked = true;
-            mutex_inner.owner_tid = Some(current_task().unwrap().tid());
         }
     }
 
@@ -119,16 +109,9 @@ impl Mutex for MutexBlocking {
         let mut mutex_inner = self.inner.exclusive_access();
         assert!(mutex_inner.locked);
         if let Some(waking_task) = mutex_inner.wait_queue.pop_front() {
-            let tid = waking_task.tid();
-            mutex_inner.owner_tid = Some(tid);
             wakeup_task(waking_task);
         } else {
             mutex_inner.locked = false;
-            mutex_inner.owner_tid = None;
         }
-    }
-
-    fn as_any(&self) -> &dyn Any {
-        self
     }
 }

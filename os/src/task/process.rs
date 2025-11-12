@@ -49,8 +49,6 @@ pub struct ProcessControlBlockInner {
     pub semaphore_list: Vec<Option<Arc<Semaphore>>>,
     /// condvar list
     pub condvar_list: Vec<Option<Arc<Condvar>>>,
-    /// whether deadlock detection is enabled for this process
-    pub deadlock_detect: bool,
 }
 
 impl ProcessControlBlockInner {
@@ -121,7 +119,6 @@ impl ProcessControlBlock {
                     mutex_list: Vec::new(),
                     semaphore_list: Vec::new(),
                     condvar_list: Vec::new(),
-                    deadlock_detect: false,
                 })
             },
         });
@@ -231,7 +228,6 @@ impl ProcessControlBlock {
                 new_fd_table.push(None);
             }
         }
-        let detect_enabled = parent.deadlock_detect;
         // create child process pcb
         let child = Arc::new(Self {
             pid,
@@ -249,7 +245,6 @@ impl ProcessControlBlock {
                     mutex_list: Vec::new(),
                     semaphore_list: Vec::new(),
                     condvar_list: Vec::new(),
-                    deadlock_detect: detect_enabled,
                 })
             },
         });

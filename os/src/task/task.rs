@@ -28,16 +28,6 @@ impl TaskControlBlock {
         let inner = process.inner_exclusive_access();
         inner.memory_set.token()
     }
-
-    /// Get task identifier of this task control block
-    pub fn tid(&self) -> usize {
-        self.inner
-            .exclusive_access()
-            .res
-            .as_ref()
-            .expect("task has been recycled")
-            .tid
-    }
 }
 
 pub struct TaskControlBlockInner {
