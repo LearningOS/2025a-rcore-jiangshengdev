@@ -5,7 +5,7 @@ use alloc::collections::{BTreeMap, BTreeSet};
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 
-const DEADLOCK_ERR: isize = -0xDEAD_isize;
+const DEADLOCK_ERR: isize = -(0xDEAD as isize);
 /// sleep syscall
 pub fn sys_sleep(ms: usize) -> isize {
     trace!(
@@ -382,7 +382,7 @@ fn add_edge(graph: &mut BTreeMap<usize, Vec<usize>>, from: usize, to: usize) {
     if from == to {
         return;
     }
-    let entry = graph.entry(from).or_default();
+    let entry = graph.entry(from).or_insert_with(Vec::new);
     if !entry.contains(&to) {
         entry.push(to);
     }
