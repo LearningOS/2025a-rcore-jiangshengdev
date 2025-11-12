@@ -6,6 +6,7 @@ use alloc::sync::Arc;
 // 死锁检测失败时返回给用户态的特定错误码。
 const DEADLOCK_ERR: isize = -0xDEAD;
 
+/// 返回当前任务对应的线程 ID，用于死锁检测矩阵索引。
 fn current_tid() -> usize {
     // 获取当前任务的引用。
     let task = current_task().unwrap();

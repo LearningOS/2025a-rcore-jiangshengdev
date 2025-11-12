@@ -115,6 +115,7 @@ struct ResourceState {
 }
 
 impl ResourceState {
+    /// 按照给定总量重置指定资源列的簿记数据。
     fn reset_resource(&mut self, id: usize, total: usize) {
         // 确保资源列存在，避免索引越界。
         self.ensure_resource(id);
@@ -130,6 +131,7 @@ impl ResourceState {
         }
     }
 
+    /// 记录线程对资源的临时需求，用于安全性评估。
     fn stage_request(&mut self, tid: usize, id: usize, amount: usize) {
         // 确保线程与资源的矩阵项已准备好。
         self.ensure_entries(tid, id);
@@ -137,6 +139,7 @@ impl ResourceState {
         self.need[tid][id] += amount;
     }
 
+    /// 在请求被拒绝时回滚线程的临时需求。
     fn unstage_request(&mut self, tid: usize, id: usize, amount: usize) {
         // 同样先确保索引有效。
         self.ensure_entries(tid, id);
@@ -148,6 +151,7 @@ impl ResourceState {
         *slot -= amount;
     }
 
+    /// 在成功分配资源后更新分配表与剩余需求。
     fn commit_allocation(&mut self, tid: usize, id: usize, amount: usize) {
         // 确保矩阵尺寸满足访问需求。
         self.ensure_entries(tid, id);
@@ -161,6 +165,7 @@ impl ResourceState {
         self.allocation[tid][id] += amount;
     }
 
+    /// 释放线程持有的资源占用记录。
     fn release_allocation(&mut self, tid: usize, id: usize, amount: usize) {
         // 保证索引有效。
         self.ensure_entries(tid, id);
@@ -172,6 +177,7 @@ impl ResourceState {
         *alloc -= amount;
     }
 
+    /// 利用银行家算法判断当前状态是否安全。
     fn check_safe(&self) -> bool {
         // 若尚未记录任何资源，则必然安全。
         if self.total.is_empty() {
@@ -221,6 +227,7 @@ impl ResourceState {
         })
     }
 
+    /// 计算仍可提供给线程使用的资源数量。
     fn available(&self) -> Vec<usize> {
         // 拷贝总资源量作为剩余资源的初始值。
         let mut remaining = self.total.clone();
@@ -242,6 +249,7 @@ impl ResourceState {
         remaining
     }
 
+    /// 确保访问矩阵时线程和资源索引均有效。
     fn ensure_entries(&mut self, tid: usize, id: usize) {
         // 先确保资源列存在。
         self.ensure_resource(id);
@@ -249,6 +257,7 @@ impl ResourceState {
         self.ensure_thread(tid);
     }
 
+    /// 扩展资源矩阵的列以容纳新的资源编号。
     fn ensure_resource(&mut self, id: usize) {
         // 当请求的资源编号超出当前容量时扩展矩阵。
         if self.total.len() <= id {
@@ -267,6 +276,7 @@ impl ResourceState {
         }
     }
 
+    /// 扩展资源矩阵的行以容纳新的线程编号。
     fn ensure_thread(&mut self, tid: usize) {
         // 若线程编号超出当前记录范围则扩展行。
         if self.allocation.len() <= tid {
