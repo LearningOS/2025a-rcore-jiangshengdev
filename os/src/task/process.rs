@@ -7,6 +7,7 @@ use super::{add_task, SignalFlags};
 use super::{pid_alloc, PidHandle};
 use crate::fs::{File, Stdin, Stdout};
 use crate::mm::{translated_refmut, MemorySet, KERNEL_SPACE};
+// 引入死锁检测器以便在进程内部维护资源状态。
 use crate::sync::{Condvar, DeadlockDetector, Mutex, Semaphore, UPSafeCell};
 use crate::trap::{trap_handler, TrapContext};
 use alloc::string::String;
@@ -49,7 +50,7 @@ pub struct ProcessControlBlockInner {
     pub semaphore_list: Vec<Option<Arc<Semaphore>>>,
     /// condvar list
     pub condvar_list: Vec<Option<Arc<Condvar>>>,
-    /// deadlock detection bookkeeping
+    /// 死锁检测簿记结构
     pub deadlock: DeadlockDetector,
 }
 
@@ -121,6 +122,7 @@ impl ProcessControlBlock {
                     mutex_list: Vec::new(),
                     semaphore_list: Vec::new(),
                     condvar_list: Vec::new(),
+                    // 初始化死锁检测器，确保内核进程具有独立簿记表。
                     deadlock: DeadlockDetector::default(),
                 })
             },
@@ -248,6 +250,7 @@ impl ProcessControlBlock {
                     mutex_list: Vec::new(),
                     semaphore_list: Vec::new(),
                     condvar_list: Vec::new(),
+                    // 为新建进程创建全新的死锁检测上下文。
                     deadlock: DeadlockDetector::default(),
                 })
             },

@@ -147,27 +147,38 @@ pub fn sys_kill(pid: usize, signal: u32) -> isize {
     }
 }
 
-/// get_time syscall
+/// get_time 系统调用
 ///
-/// YOUR JOB: get time with second and microsecond
-/// HINT: You might reimplement it with virtual memory management.
-/// HINT: What if [`TimeVal`] is splitted by two pages ?
+/// 需求：按秒与微秒拆分当前时间并写入用户态结构。
+/// 提示：需要借助虚拟内存翻译写入跨页数据。
+/// 思考：当 [`TimeVal`] 跨越两个页面时如何处理？
 pub fn sys_get_time(ts: *mut TimeVal, _tz: usize) -> isize {
+    // 打印调试日志以便追踪调用来源。
     trace!(
         "kernel:pid[{}] sys_get_time",
         current_task().unwrap().process.upgrade().unwrap().getpid()
     );
+    // 若用户指针无效，直接返回错误。
     if ts.is_null() {
         return -1;
     }
+    // 获取当前用户空间的地址转换 token。
     let token = current_user_token();
+    // 将微秒常量定义在函数内部以保持局部作用域。
     const USEC_PER_SEC: usize = 1_000_000;
+    // 从内核计时器读取当前经过的微秒数。
     let current_us = get_time_us();
+    // 计算秒数部分。
     let sec = current_us / USEC_PER_SEC;
+    // 计算微秒余数部分。
     let usec = current_us % USEC_PER_SEC;
+    // 将用户指针翻译为可写引用。
     let timeval = translated_refmut(token, ts);
+    // 写入秒数字段。
     timeval.sec = sec;
+    // 写入微秒字段。
     timeval.usec = usec;
+    // 成功完成后返回零。
     0
 }
 
